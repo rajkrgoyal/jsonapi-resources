@@ -11,7 +11,7 @@ module JSONAPI
 
       def formatter_for(format)
         formatter_class_name = "#{format.to_s.camelize}Formatter"
-        formatter_class_name.safe_constantize
+        formatter_class_name.constantize
       end
     end
   end
@@ -23,6 +23,18 @@ module JSONAPI
       end
 
       def unformat(formatted_key)
+        super
+      end
+    end
+  end
+
+  class TypeFormatter < Formatter
+    class << self
+      def format(type_key)
+        super
+      end
+
+      def unformat(formatted_type_key)
         super
       end
     end
@@ -59,6 +71,15 @@ module JSONAPI
 end
 
 class UnderscoredKeyFormatter < JSONAPI::KeyFormatter
+  class << self
+    def format(key)
+      super.underscore
+    end
+
+    def unformat(key)
+      super
+    end
+  end
 end
 
 class CamelizedKeyFormatter < JSONAPI::KeyFormatter
@@ -125,6 +146,33 @@ class DasherizedRouteFormatter < JSONAPI::RouteFormatter
 
     def unformat(formatted_route)
       formatted_route.to_s.underscore
+    end
+  end
+end
+
+class SingularTypeFormatter < JSONAPI::TypeFormatter
+end
+
+class PluralTypeFormatter < JSONAPI::TypeFormatter
+  class << self
+    def format(type_key)
+      type_key.pluralize
+    end
+
+    def unformat(formatted_type_key)
+      formatted_type_key.singularize
+    end
+  end
+end
+
+class ClassNameTypeFormatter < JSONAPI::TypeFormatter
+  class << self
+    def format(type_key)
+      type_key.underscore.classify
+    end
+
+    def unformat(formatted_type_key)
+      super
     end
   end
 end

@@ -80,7 +80,7 @@ module JSONAPI
     def engine_resource_path_name_from_source(source)
       scopes         = module_scopes_from_class(source.class)[1..-1]
       base_path_name = scopes.map { |scope| scope.underscore }.join("_")
-      end_path_name  = source.class._type.to_s.singularize
+      end_path_name  = source.class._type.to_s
       [base_path_name, end_path_name, "path"].reject(&:blank?).join("_")
     end
 
@@ -91,7 +91,7 @@ module JSONAPI
     def engine_resources_path_name_from_class(klass)
       scopes         = module_scopes_from_class(klass)[1..-1]
       base_path_name = scopes.map { |scope| scope.underscore }.join("_")
-      end_path_name  = klass._type.to_s
+      end_path_name  = klass._type.to_s.pluralize
       "#{ base_path_name }_#{ end_path_name }_path"
     end
 
@@ -116,7 +116,7 @@ module JSONAPI
     def regular_primary_resources_path
       [
         formatted_module_path_from_class(primary_resource_klass),
-        route_formatter.format(primary_resource_klass._type.to_s),
+        route_formatter.format(primary_resource_klass._type.to_s.pluralize),
       ].join
     end
 
@@ -127,7 +127,7 @@ module JSONAPI
     def regular_resource_path(source)
       [
         formatted_module_path_from_class(source.class),
-        route_formatter.format(source.class._type.to_s),
+        route_formatter.format(source.class._type.to_s.pluralize),
         "/#{ source.id }",
       ].join
     end

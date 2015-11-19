@@ -284,8 +284,7 @@ module JSONAPI
         base._relationships = (_relationships || {}).dup
         base._allowed_filters = (_allowed_filters || Set.new).dup
 
-        type = base.name.demodulize.sub(/Resource$/, '').underscore
-        base._type = type.pluralize.to_sym
+        base._type = base.name.demodulize.sub(/Resource$/, '')
 
         base.attribute :id, format: :id
 

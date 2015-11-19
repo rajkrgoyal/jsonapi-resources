@@ -1863,7 +1863,7 @@ class ExpenseEntriesControllerTest < ActionController::TestCase
     post :create,
          {
            data: {
-             type: 'expense_entries',
+             type: 'expenseEntries',
              attributes: {
                transactionDate: '2014/04/15',
                cost: 50.58
@@ -1897,7 +1897,7 @@ class ExpenseEntriesControllerTest < ActionController::TestCase
     post :create,
          {
            data: {
-             type: 'expense_entries',
+             type: 'expense-entries',
              attributes: {
                'transaction-date' => '2014/04/15',
                cost: 50.58
@@ -1938,7 +1938,7 @@ class IsoCurrenciesControllerTest < ActionController::TestCase
   def test_create_currencies_client_generated_id
     set_content_type_header!
     original_config = JSONAPI.configuration.dup
-    JSONAPI.configuration.json_key_format = :underscored_route
+    JSONAPI.configuration.json_key_format = :underscored_key
 
     post :create,
          {

@@ -10,6 +10,7 @@ b:
   name: Fred Reader
   email: fred@xyz.fake
   date_joined: <%= DateTime.parse('2013-10-31 20:25:00 UTC +00:00') %>
+  hair_cut_id: 1
 
 c:
   id: 3

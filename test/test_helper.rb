@@ -15,6 +15,7 @@ end
 require 'rails/all'
 require 'rails/test_help'
 require 'minitest/mock'
+require 'minitest/pretty_diff'
 require 'jsonapi-resources'
 require 'pry'
 
@@ -299,6 +300,18 @@ class UpperCamelizedKeyFormatter < JSONAPI::KeyFormatter
 
     def unformat(formatted_key)
       formatted_key.to_s.underscore
+    end
+  end
+end
+
+class DoubledTypeFormatter < PluralTypeFormatter
+  class << self
+    def format(type)
+      super * 2
+    end
+
+    def unformat(type)
+      super type[0, type.length/2]
     end
   end
 end

@@ -13,6 +13,7 @@ module JSONAPI
     #              relationship ids in the links section for a resource. Fields are global for a resource type.
     #     Example: { people: [:id, :email, :comments], posts: [:id, :title, :author], comments: [:id, :body, :post]}
     # key_formatter: KeyFormatter class to override the default configuration
+    # type_formatter: TypeFormatter class to override the default configuration
     # serializer_options: additional options that will be passed to resource meta and links lambdas
 
     def initialize(primary_resource_klass, options = {})
@@ -21,6 +22,7 @@ module JSONAPI
       @include            = options.fetch(:include, [])
       @include_directives = options[:include_directives]
       @key_formatter      = options.fetch(:key_formatter, JSONAPI.configuration.key_formatter)
+      @type_formatter     = options.fetch(:type_formatter, JSONAPI.configuration.type_formatter)
       @url_generator      = generate_link_builder(primary_resource_klass, options)
       @always_include_to_one_linkage_data = options.fetch(:always_include_to_one_linkage_data,
                                                           JSONAPI.configuration.always_include_to_one_linkage_data)
@@ -80,6 +82,10 @@ module JSONAPI
       @key_formatter.format(key)
     end
 
+    def format_type(type)
+      @type_formatter.format(@key_formatter.format(type))
+    end
+
     def format_value(value, format)
       value_formatter = JSONAPI::ValueFormatter.value_formatter_for(format)
       value_formatter.format(value)
@@ -119,7 +125,7 @@ module JSONAPI
       id_format = 'id' if id_format == :default
       obj_hash['id'] = format_value(source.id, id_format)
 
-      obj_hash['type'] = format_key(source.class._type.to_s)
+      obj_hash['type'] = format_type(source.class._type.to_s)
 
       links = relationship_links(source)
       obj_hash['links'] = links unless links.empty?
@@ -139,8 +145,9 @@ module JSONAPI
 
     def requested_fields(klass)
       return if @fields.nil? || @fields.empty?
-      if @fields[klass._type]
-        @fields[klass._type]
+      t = format_type(klass._type).to_sym
+      if @fields[t]
+        @fields[t]
       elsif klass.superclass != JSONAPI::Resource
         requested_fields(klass.superclass)
       end
@@ -232,7 +239,7 @@ module JSONAPI
     end
 
     def already_serialized?(type, id)
-      type = format_key(type)
+      type = format_type(type)
       @included_objects.key?(type) && @included_objects[type].key?(id)
     end
 
@@ -249,7 +256,7 @@ module JSONAPI
       linkage_id = foreign_key_value(source, relationship)
 
       if linkage_id
-        linkage[:type] = format_key(relationship.type_for_source(source))
+        linkage[:type] = format_type(relationship.type_for_source(source))
         linkage[:id] = linkage_id
       else
         linkage = nil
@@ -262,7 +269,7 @@ module JSONAPI
       linkage_types_and_values = foreign_key_types_and_values(source, relationship)
 
       linkage_types_and_values.each do |type, value|
-        linkage.append({type: format_key(type), id: value})
+        linkage.append({type: format_type(type), id: value})
       end
       linkage
     end
@@ -305,7 +312,7 @@ module JSONAPI
       if relationship.is_a?(JSONAPI::Relationship::ToMany)
         if relationship.polymorphic?
           source._model.public_send(relationship.name).pluck(:type, :id).map do |type, id|
-            [type.pluralize, IdValueFormatter.format(id)]
+            [type, IdValueFormatter.format(id)]
           end
         else
           source.public_send(relationship.foreign_key).map do |value|

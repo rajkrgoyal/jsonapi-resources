@@ -25,5 +25,6 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency 'minitest-spec-rails'
   spec.add_development_dependency 'simplecov'
   spec.add_development_dependency 'pry'
+  spec.add_development_dependency 'minitest-pretty_diff'
   spec.add_dependency 'rails', '>= 4.0'
 end

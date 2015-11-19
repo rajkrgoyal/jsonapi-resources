@@ -9,6 +9,8 @@ module JSONAPI
                 :key_formatter,
                 :route_format,
                 :route_formatter,
+                :type_format,
+                :type_formatter,
                 :raise_if_parameters_not_allowed,
                 :operations_processor,
                 :allow_include,
@@ -31,6 +33,9 @@ module JSONAPI
 
       #:underscored_route, :camelized_route, :dasherized_route, or custom
       self.route_format = :dasherized_route
+
+      #:singular_type, :plural_type, :class_name_type, or custom
+      self.type_format = :plural_type
 
       #:basic, :active_record, or custom
       self.operations_processor = :active_record
@@ -88,6 +93,11 @@ module JSONAPI
     def route_format=(format)
       @route_format = format
       @route_formatter = JSONAPI::Formatter.formatter_for(format)
+    end
+
+    def type_format=(format)
+      @type_format = format
+      @type_formatter = JSONAPI::Formatter.formatter_for(format)
     end
 
     def operations_processor=(operations_processor)

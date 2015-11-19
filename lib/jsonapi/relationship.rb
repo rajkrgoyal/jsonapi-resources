@@ -52,7 +52,7 @@ module JSONAPI
       def initialize(name, options = {})
         super
         @class_name = options.fetch(:class_name, name.to_s.camelize)
-        @type = class_name.underscore.pluralize.to_sym
+        @type = class_name
         @foreign_key ||= "#{name}_id".to_sym
         @foreign_key_on = options.fetch(:foreign_key_on, :self)
       end
@@ -70,7 +70,7 @@ module JSONAPI
       def initialize(name, options = {})
         super
         @class_name = options.fetch(:class_name, name.to_s.camelize.singularize)
-        @type = class_name.underscore.pluralize.to_sym
+        @type = class_name
         @foreign_key ||= "#{name.to_s.singularize}_ids".to_sym
       end
     end

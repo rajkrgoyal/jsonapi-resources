@@ -10,6 +10,7 @@ class SerializerTest < ActionDispatch::IntegrationTest
     @expense_entry = ExpenseEntry.find(1)
 
     JSONAPI.configuration.json_key_format = :camelized_key
+    JSONAPI.configuration.type_format = :plural_type
     JSONAPI.configuration.route_format = :camelized_route
     JSONAPI.configuration.always_include_to_one_linkage_data = false
   end
@@ -17,6 +18,7 @@ class SerializerTest < ActionDispatch::IntegrationTest
   def after_teardown
     JSONAPI.configuration.always_include_to_one_linkage_data = false
     JSONAPI.configuration.json_key_format = :underscored_key
+    JSONAPI.configuration.type_format = :plural_type
   end
 
   def test_serializer
@@ -351,6 +353,38 @@ class SerializerTest < ActionDispatch::IntegrationTest
       },
       serialized
     )
+  end
+
+  def test_serializer_singular_type_format
+    JSONAPI.configuration.type_format = :singular_type
+    serialized = JSONAPI::ResourceSerializer.new(
+      PersonResource, include: ['hair_cut']
+    ).serialize_to_hash(PersonResource.new(@fred, nil))
+
+    assert_equal 'person', serialized[:data]['type']
+    assert_equal 'hairCut', serialized[:included].first['type']
+  end
+
+  def test_serializer_class_name_type_format
+    JSONAPI.configuration.json_key_format = :dasherized_key
+    JSONAPI.configuration.type_format = :class_name_type
+    serialized = JSONAPI::ResourceSerializer.new(
+      PersonResource, include: ['hair_cut']
+    ).serialize_to_hash(PersonResource.new(@fred, nil))
+
+    assert_equal 'Person', serialized[:data]['type']
+    assert_equal 'HairCut', serialized[:included].first['type']
+  end
+
+  def test_serializer_custom_type_format
+    JSONAPI.configuration.json_key_format = :underscored_key
+    JSONAPI.configuration.type_format = :doubled_type
+    serialized = JSONAPI::ResourceSerializer.new(
+      PersonResource, include: ['hair_cut']
+    ).serialize_to_hash(PersonResource.new(@fred, nil))
+
+    assert_equal 'peoplepeople', serialized[:data]['type']
+    assert_equal 'hair_cutshair_cuts', serialized[:included].first['type']
   end
 
   def test_serializer_include_sub_objects
@@ -1780,7 +1814,7 @@ class SerializerTest < ActionDispatch::IntegrationTest
           },
           meta: {
             fixed: 'Hardcoded value',
-            computed: 'authors: /api/v5/authors/1'
+            computed: 'Author: /api/v5/authors/1'
           }
         },
         included: [

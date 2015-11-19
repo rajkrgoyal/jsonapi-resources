@@ -21,7 +21,7 @@ module ActionDispatch
           res = JSONAPI::Resource.resource_for(resource_type_with_module_prefix(@resource_type))
 
           options = resources.extract_options!.dup
-          options[:controller] ||= @resource_type
+          options[:controller] ||= @resource_type.to_s.underscore.pluralize
           options.merge!(res.routing_resource_options)
           options[:path] = format_route(@resource_type)
 
@@ -61,7 +61,7 @@ module ActionDispatch
           res = JSONAPI::Resource.resource_for(resource_type_with_module_prefix(@resource_type))
 
           options = resources.extract_options!.dup
-          options[:controller] ||= @resource_type
+          options[:controller] ||= @resource_type.to_s.underscore.pluralize
           options.merge!(res.routing_resource_options)
 
           options[:param] = :id
@@ -114,7 +114,7 @@ module ActionDispatch
           options = links.extract_options!.dup
 
           res = JSONAPI::Resource.resource_for(resource_type_with_module_prefix)
-          options[:controller] ||= res._type.to_s
+          options[:controller] ||= res._type.to_s.underscore.pluralize
 
           methods = links_methods(options)
 
@@ -142,7 +142,7 @@ module ActionDispatch
           options = links.extract_options!.dup
 
           res = JSONAPI::Resource.resource_for(resource_type_with_module_prefix)
-          options[:controller] ||= res._type.to_s
+          options[:controller] ||= res._type.to_s.underscore.pluralize
 
           methods = links_methods(options)
 
@@ -182,7 +182,7 @@ module ActionDispatch
             options[:controller] ||= relationship.class_name.underscore.pluralize
           else
             related_resource = JSONAPI::Resource.resource_for(resource_type_with_module_prefix(relationship.class_name.underscore.pluralize))
-            options[:controller] ||= related_resource._type.to_s
+            options[:controller] ||= related_resource._type.to_s.underscore.pluralize
           end
 
           match "#{formatted_relationship_name}", controller: options[:controller],
@@ -199,7 +199,7 @@ module ActionDispatch
 
           formatted_relationship_name = format_route(relationship.name)
           related_resource = JSONAPI::Resource.resource_for(resource_type_with_module_prefix(relationship.class_name.underscore))
-          options[:controller] ||= related_resource._type.to_s
+          options[:controller] ||= related_resource._type.to_s.underscore.pluralize
 
           match "#{formatted_relationship_name}", controller: options[:controller],
                                                   relationship: relationship.name, source: resource_type_with_module_prefix(source._type),
