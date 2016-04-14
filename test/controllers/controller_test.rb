@@ -3206,6 +3206,14 @@ class Api::V1::CratersControllerTest < ActionController::TestCase
     assert_equal "moons", json_response['data']['type']
     assert_equal "1", json_response['data']['id']
   end
+
+  def test_alternate_preload_method_query_count
+    count_queries do
+      get :index, {include: 'moon'}
+    end
+    assert_response :success
+    assert_query_count(1)
+  end
 end
 
 class CarsControllerTest < ActionController::TestCase

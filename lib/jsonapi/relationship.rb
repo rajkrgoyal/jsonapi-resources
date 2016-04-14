@@ -1,7 +1,7 @@
 module JSONAPI
   class Relationship
     attr_reader :acts_as_set, :foreign_key, :type, :options, :name,
-                :class_name, :polymorphic, :always_include_linkage_data,
+                :class_name, :preload_method, :polymorphic, :always_include_linkage_data,
                 :parent_resource
 
     def initialize(name, options = {})
@@ -11,6 +11,7 @@ module JSONAPI
       @foreign_key = options[:foreign_key] ? options[:foreign_key].to_sym : nil
       @parent_resource = options[:parent_resource]
       @relation_name = options.fetch(:relation_name, @name)
+      @preload_method = options.fetch(:preload_method, :includes)
       @polymorphic = options.fetch(:polymorphic, false) == true
       @always_include_linkage_data = options.fetch(:always_include_linkage_data, false) == true
     end
@@ -39,6 +40,26 @@ module JSONAPI
           @relation_name.to_sym
         when Proc
           @relation_name.call(options)
+      end
+    end
+
+    def apply_preload(records, path, options)
+      # Convert [:a, :b, :c] to { a: { b: { c: {} } } }
+      full_path = path + [relation_name(options)]
+      hash_path = full_path.reverse.reduce({}) do |memo, elem|
+        { elem => memo }
+      end
+
+      method = options.fetch(:preload_method, @preload_method)
+      case method
+        when Symbol, String
+          records.send(method, hash_path)
+        when NilClass
+          records # Skip preloading, fall back to N+1 queries
+        when Proc
+          method.call(records, hash_path)
+        else
+          raise ArgumentError.new("Invalid preload_method: #{@preload_method.inspect}")
       end
     end
 

@@ -495,31 +495,14 @@ module JSONAPI
         _relationships.keys | _attributes.keys
       end
 
-      def resolve_relationship_names_to_relations(resource_klass, model_includes, options = {})
-        case model_includes
-          when Array
-            return model_includes.map do |value|
-              resolve_relationship_names_to_relations(resource_klass, value, options)
-            end
-          when Hash
-            model_includes.keys.each do |key|
-              relationship = resource_klass._relationships[key]
-              value = model_includes[key]
-              model_includes.delete(key)
-              model_includes[relationship.relation_name(options)] = resolve_relationship_names_to_relations(relationship.resource_klass, value, options)
-            end
-            return model_includes
-          when Symbol
-            relationship = resource_klass._relationships[model_includes]
-            return relationship.relation_name(options)
-        end
-      end
-
       def apply_includes(records, options = {})
         include_directives = options[:include_directives]
         if include_directives
-          model_includes = resolve_relationship_names_to_relations(self, include_directives.model_includes, options)
-          records = records.includes(model_includes)
+          include_directives.relations(self).each do |path, relations|
+            relations.each do |relation|
+              records = relation.apply_preload(records, path, options)
+            end
+          end
         end
 
         records

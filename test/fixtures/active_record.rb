@@ -1070,7 +1070,7 @@ class CraterResource < JSONAPI::Resource
   attribute :code
   attribute :description
 
-  has_one :moon
+  has_one :moon, preload_method: :eager_load
 
   def self.verify_key(key, context = nil)
     key && String(key)

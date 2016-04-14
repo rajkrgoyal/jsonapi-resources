@@ -34,7 +34,22 @@ module JSONAPI
       get_includes(@include_directives_hash)
     end
 
+    def relations(resource_klass, options = {})
+      get_relation_paths(resource_klass, options, @include_directives_hash)
+    end
+
     private
+
+    def get_relation_paths(resource_klass, options, directive)
+      directive[:include_related].map do |name, sub_directive|
+        relation = resource_klass._relationships[name]
+        sub_rels = get_relation_paths(relation.resource_klass, options, sub_directive)
+        sub_rels.transform_keys!{|k| [relation.relation_name(options)] + k }
+        {[] => [relation]}.merge(sub_rels)
+      end.reduce({}) do |memo, h|
+        memo.merge(h){ |key,arr1,arr2| arr1 + arr2 }
+      end
+    end
 
     def get_related(current_path)
       current = @include_directives_hash
@@ -47,8 +62,8 @@ module JSONAPI
     end
 
     def get_includes(directive)
-      directive[:include_related].map do |name, directive|
-        sub = get_includes(directive)
+      directive[:include_related].map do |name, sub_directive|
+        sub = get_includes(sub_directive)
         sub.any? ? { name => sub } : name
       end
     end
