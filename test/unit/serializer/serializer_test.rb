@@ -255,7 +255,7 @@ class SerializerTest < ActionDispatch::IntegrationTest
     serialized = JSONAPI::ResourceSerializer.new(
       PostResource,
       include: ['author'],
-      key_formatter: UnderscoredKeyFormatter
+      key_formatter: UnderscoredKeyFormatter.new
     ).serialize_to_hash(PostResource.new(@post, nil))
 
     assert_hash_equals(

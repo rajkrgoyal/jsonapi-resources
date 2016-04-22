@@ -113,7 +113,7 @@ module JSONAPI
     #     JSONAPI.configuration.route = :camelized_route
     #
     # Override if you want to set a per controller key format.
-    # Must return a class derived from KeyFormatter.
+    # Must return an instance of a class derived from KeyFormatter.
     def key_formatter
       JSONAPI.configuration.key_formatter
     end

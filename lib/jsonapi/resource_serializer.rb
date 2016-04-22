@@ -12,7 +12,7 @@ module JSONAPI
     #     Purpose: determines which fields are serialized for a resource type. This encompasses both attributes and
     #              relationship ids in the links section for a resource. Fields are global for a resource type.
     #     Example: { people: [:id, :email, :comments], posts: [:id, :title, :author], comments: [:id, :body, :post]}
-    # key_formatter: KeyFormatter class to override the default configuration
+    # key_formatter: KeyFormatter instance to override the default configuration
     # serializer_options: additional options that will be passed to resource meta and links lambdas
 
     def initialize(primary_resource_klass, options = {})
@@ -21,12 +21,17 @@ module JSONAPI
       @include            = options.fetch(:include, [])
       @include_directives = options[:include_directives]
       @key_formatter      = options.fetch(:key_formatter, JSONAPI.configuration.key_formatter)
+      @id_formatter       = ValueFormatter.value_formatter_for(:id)
       @link_builder       = generate_link_builder(primary_resource_klass, options)
       @always_include_to_one_linkage_data = options.fetch(:always_include_to_one_linkage_data,
                                                           JSONAPI.configuration.always_include_to_one_linkage_data)
       @always_include_to_many_linkage_data = options.fetch(:always_include_to_many_linkage_data,
                                                            JSONAPI.configuration.always_include_to_many_linkage_data)
       @serialization_options = options.fetch(:serialization_options, {})
+
+      # Warning: This makes ResourceSerializer non-thread-safe. That's not a problem with the
+      # request-specific way it's currently used, though.
+      @value_formatter_type_cache = NaiveCache.new{|arg| ValueFormatter.value_formatter_for(arg) }
     end
 
     # Converts a single resource, or an array of resources to a hash, conforming to the JSONAPI structure
@@ -81,8 +86,7 @@ module JSONAPI
     end
 
     def format_value(value, format)
-      value_formatter = JSONAPI::ValueFormatter.value_formatter_for(format)
-      value_formatter.format(value)
+      @value_formatter_type_cache.get(format).format(value)
     end
 
     private
@@ -300,7 +304,7 @@ module JSONAPI
     def foreign_key_value(source, relationship)
       foreign_key = relationship.foreign_key
       value = source.public_send(foreign_key)
-      IdValueFormatter.format(value)
+      @id_formatter.format(value)
     end
 
     def foreign_key_types_and_values(source, relationship)
@@ -310,16 +314,16 @@ module JSONAPI
           # Avoid hitting the database again for values already pre-loaded
           if assoc.respond_to?(:loaded?) and assoc.loaded?
             assoc.map do |obj|
-              [obj.type.underscore.pluralize, IdValueFormatter.format(obj.id)]
+              [obj.type.underscore.pluralize, @id_formatter.format(obj.id)]
             end
           else
             assoc.pluck(:type, :id).map do |type, id|
-              [type.underscore.pluralize, IdValueFormatter.format(id)]
+              [type.underscore.pluralize, @id_formatter.format(id)]
             end
           end
         else
           source.public_send(relationship.foreign_key).map do |value|
-            [relationship.type, IdValueFormatter.format(value)]
+            [relationship.type, @id_formatter.format(value)]
           end
         end
       end

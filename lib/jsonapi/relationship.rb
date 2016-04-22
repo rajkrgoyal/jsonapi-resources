@@ -17,12 +17,12 @@ module JSONAPI
 
     alias_method :polymorphic?, :polymorphic
 
-    def primary_key
-      @primary_key ||= resource_klass._primary_key
+    def resource_klass
+      @resource_klass ||= @parent_resource.resource_for(@class_name)
     end
 
-    def resource_klass
-      @resource_klass = @parent_resource.resource_for(@class_name)
+    def primary_key
+      @primary_key ||= resource_klass._primary_key
     end
 
     def table_name

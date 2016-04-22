@@ -12,11 +12,6 @@ class RequestTest < ActionDispatch::IntegrationTest
     JSONAPI.configuration.route_format = :underscored_route
   end
 
-  def assert_jsonapi_response(expected_status)
-    assert_equal JSONAPI::MEDIA_TYPE, response.content_type
-    assert_equal expected_status, status
-  end
-
   def test_get
     get '/posts'
     assert_jsonapi_response 200

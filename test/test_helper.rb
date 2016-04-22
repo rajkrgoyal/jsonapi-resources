@@ -425,44 +425,55 @@ end
 class ActionDispatch::IntegrationTest
   self.fixture_path = "#{Rails.root}/fixtures"
   fixtures :all
+
+  def assert_jsonapi_response(expected_status)
+    assert_equal JSONAPI::MEDIA_TYPE, response.content_type
+    assert_equal expected_status, status
+  end
+end
+
+class IntegrationBenchmark < ActionDispatch::IntegrationTest
+  def self.runnable_methods
+    methods_matching(/^bench_/)
+  end
+
+  def self.run_one_method(klass, method_name, reporter)
+    Benchmark.bm(method_name.length) do |job|
+      job.report(method_name) do
+        super(klass, method_name, reporter)
+      end
+    end
+  end
 end
 
 class UpperCamelizedKeyFormatter < JSONAPI::KeyFormatter
-  class << self
-    def format(key)
-      super.camelize(:upper)
-    end
+  def format(key)
+    super.camelize(:upper)
+  end
 
-    def unformat(formatted_key)
-      formatted_key.to_s.underscore
-    end
+  def unformat(formatted_key)
+    formatted_key.to_s.underscore
   end
 end
 
 class DateWithTimezoneValueFormatter < JSONAPI::ValueFormatter
-  class << self
-    def format(raw_value)
-      raw_value.in_time_zone('Eastern Time (US & Canada)').to_s
-    end
+  def format(raw_value)
+    raw_value.in_time_zone('Eastern Time (US & Canada)').to_s
   end
 end
 
 class DateValueFormatter < JSONAPI::ValueFormatter
-  class << self
-    def format(raw_value)
-      raw_value.strftime('%m/%d/%Y')
-    end
+  def format(raw_value)
+    raw_value.strftime('%m/%d/%Y')
   end
 end
 
 class TitleValueFormatter < JSONAPI::ValueFormatter
-  class << self
-    def format(raw_value)
-      super(raw_value).titlecase
-    end
+  def format(raw_value)
+    super(raw_value).titlecase
+  end
 
-    def unformat(value)
-      value.to_s.downcase
-    end
+  def unformat(value)
+    value.to_s.downcase
   end
 end

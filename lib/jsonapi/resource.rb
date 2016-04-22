@@ -309,6 +309,8 @@ module JSONAPI
     end
 
     class << self
+      @@model_types_to_resource_types = {}
+
       def inherited(subclass)
         subclass.abstract(false)
         subclass.immutable(false)
@@ -350,28 +352,16 @@ module JSONAPI
         resource_for(resource_type_for(model))
       end
 
-      @@type_name_to_resource_name_cache = JSONAPI::NaiveCache.new do |type|
+      def _resource_name_from_type(type)
         "#{type.to_s.underscore.singularize}_resource".camelize
       end
 
-      def _resource_name_from_type(type)
-        @@type_name_to_resource_name_cache.calc(type)
-      end
-
-      @@model_to_model_name_cache = JSONAPI::NaiveCache.new do |model|
-        model.class.to_s.underscore
-      end
-
-      @@model_name_to_resource_type_cache = JSONAPI::NaiveCache.new do |model_name|
-        model_name.rpartition('/').last
-      end
-
       def resource_type_for(model)
-        model_name = @@model_to_model_name_cache.calc(model)
+        model_name = model.class.to_s.underscore
         if _model_hints[model_name]
           _model_hints[model_name]
         else
-          @@model_name_to_resource_type_cache.calc(model_name)
+          model_name.rpartition('/').last
         end
       end
 
@@ -613,8 +603,10 @@ module JSONAPI
         records = apply_pagination(records, options[:paginator], order_options)
 
         resources = []
+        resource_classes = {}
         records.each do |model|
-          resources.push self.resource_for_model(model).new(model, context)
+          resource_class = resource_classes[model.class] ||= self.resource_for_model(model)
+          resources.push resource_class.new(model, context)
         end
 
         resources
@@ -677,7 +669,7 @@ module JSONAPI
       end
 
       def resource_key_type
-        @_resource_key_type || JSONAPI.configuration.resource_key_type
+        @_resource_key_type ||= JSONAPI.configuration.resource_key_type
       end
 
       def verify_key(key, context = nil)
