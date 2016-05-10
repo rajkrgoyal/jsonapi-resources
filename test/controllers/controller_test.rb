@@ -10,7 +10,7 @@ class PostsControllerTest < ActionController::TestCase
   end
 
   def test_index
-    get :index
+    assert_cacheable_get :index
     assert_response :success
     assert json_response['data'].is_a?(Array)
   end
@@ -18,7 +18,7 @@ class PostsControllerTest < ActionController::TestCase
   def test_accept_header_missing
     @request.headers['Accept'] = nil
 
-    get :index
+    assert_cacheable_get :index
     assert_response :success
   end
 
@@ -26,14 +26,14 @@ class PostsControllerTest < ActionController::TestCase
     @request.headers['Accept'] =
       "#{JSONAPI::MEDIA_TYPE},#{JSONAPI::MEDIA_TYPE};charset=test"
 
-    get :index
+    assert_cacheable_get :index
     assert_response :success
   end
 
   def test_accept_header_jsonapi_modified
     @request.headers['Accept'] = "#{JSONAPI::MEDIA_TYPE};charset=test"
 
-    get :index
+    assert_cacheable_get :index
     assert_response 406
     assert_equal 'Not acceptable', json_response['errors'][0]['title']
     assert_equal "All requests must use the '#{JSONAPI::MEDIA_TYPE}' Accept without media type parameters. This request specified '#{@request.headers['Accept']}'.", json_response['errors'][0]['detail']
@@ -43,7 +43,7 @@ class PostsControllerTest < ActionController::TestCase
     @request.headers['Accept'] =
       "#{JSONAPI::MEDIA_TYPE};charset=test,#{JSONAPI::MEDIA_TYPE};charset=test"
 
-    get :index
+    assert_cacheable_get :index
     assert_response 406
     assert_equal 'Not acceptable', json_response['errors'][0]['title']
     assert_equal "All requests must use the '#{JSONAPI::MEDIA_TYPE}' Accept without media type parameters. This request specified '#{@request.headers['Accept']}'.", json_response['errors'][0]['detail']
@@ -52,34 +52,35 @@ class PostsControllerTest < ActionController::TestCase
   def test_accept_header_all
     @request.headers['Accept'] = "*/*"
 
-    get :index
+    assert_cacheable_get :index
     assert_response :success
   end
 
   def test_accept_header_not_jsonapi
     @request.headers['Accept'] = 'text/plain'
 
-    get :index
+    assert_cacheable_get :index
     assert_response 406
     assert_equal 'Not acceptable', json_response['errors'][0]['title']
     assert_equal "All requests must use the '#{JSONAPI::MEDIA_TYPE}' Accept without media type parameters. This request specified '#{@request.headers['Accept']}'.", json_response['errors'][0]['detail']
   end
 
   def test_exception_class_whitelist
-    original_config = JSONAPI.configuration.dup
+    original_whitelist = JSONAPI.configuration.exception_class_whitelist.dup
     $PostProcessorRaisesErrors = true
     # test that the operations dispatcher rescues the error when it
     # has not been added to the exception_class_whitelist
-    get :index
+    assert_cacheable_get :index
     assert_response 500
+
     # test that the operations dispatcher does not rescue the error when it
     # has been added to the exception_class_whitelist
     JSONAPI.configuration.exception_class_whitelist << PostsController::SpecialError
-    get :index
+    assert_cacheable_get :index
     assert_response 403
   ensure
     $PostProcessorRaisesErrors = false
-    JSONAPI.configuration = original_config
+    JSONAPI.configuration.exception_class_whitelist = original_whitelist
   end
 
   def test_on_server_error_block_callback_with_exception
@@ -92,7 +93,7 @@ class PostsControllerTest < ActionController::TestCase
       @controller.class.instance_variable_set(:@callback_message, "Sent from block")
     end
 
-    get :index
+    assert_cacheable_get :index
     assert_equal @controller.class.instance_variable_get(:@callback_message), "Sent from block"
 
     # test that it renders the default server error response
@@ -112,7 +113,7 @@ class PostsControllerTest < ActionController::TestCase
     @controller.class.on_server_error :set_callback_message, :a_bogus_method
     @controller.class.instance_variable_set(:@callback_message, "none")
 
-    get :index
+    assert_cacheable_get :index
     assert_equal @controller.class.instance_variable_get(:@callback_message), "Sent from method"
 
     # test that it renders the default server error response
@@ -128,7 +129,7 @@ class PostsControllerTest < ActionController::TestCase
     @controller.class.on_server_error callback
     @controller.class.instance_variable_set(:@callback_message, "none")
 
-    get :index
+    assert_cacheable_get :index
     assert_equal @controller.class.instance_variable_get(:@callback_message), "none"
 
     # test that it does not render error
@@ -138,49 +139,49 @@ class PostsControllerTest < ActionController::TestCase
   end
 
   def test_index_filter_with_empty_result
-    get :index, params: {filter: {title: 'post that does not exist'}}
+    assert_cacheable_get :index, params: {filter: {title: 'post that does not exist'}}
     assert_response :success
     assert json_response['data'].is_a?(Array)
     assert_equal 0, json_response['data'].size
   end
 
   def test_index_filter_by_id
-    get :index, params: {filter: {id: '1'}}
+    assert_cacheable_get :index, params: {filter: {id: '1'}}
     assert_response :success
     assert json_response['data'].is_a?(Array)
     assert_equal 1, json_response['data'].size
   end
 
   def test_index_filter_by_title
-    get :index, params: {filter: {title: 'New post'}}
+    assert_cacheable_get :index, params: {filter: {title: 'New post'}}
     assert_response :success
     assert json_response['data'].is_a?(Array)
     assert_equal 1, json_response['data'].size
   end
 
   def test_index_filter_with_hash_values
-    get :index, params: {filter: {search: {title: 'New post'}}}
+    assert_cacheable_get :index, params: {filter: {search: {title: 'New post'}}}
     assert_response :success
     assert json_response['data'].is_a?(Array)
     assert_equal 1, json_response['data'].size
   end
 
   def test_index_filter_by_ids
-    get :index, params: {filter: {ids: '1,2'}}
+    assert_cacheable_get :index, params: {filter: {ids: '1,2'}}
     assert_response :success
     assert json_response['data'].is_a?(Array)
     assert_equal 2, json_response['data'].size
   end
 
   def test_index_filter_by_ids_and_include_related
-    get :index, params: {filter: {id: '2'}, include: 'comments'}
+    assert_cacheable_get :index, params: {filter: {id: '2'}, include: 'comments'}
     assert_response :success
     assert_equal 1, json_response['data'].size
     assert_equal 1, json_response['included'].size
   end
 
   def test_index_filter_by_ids_and_include_related_different_type
-    get :index, params: {filter: {id: '1,2'}, include: 'author'}
+    assert_cacheable_get :index, params: {filter: {id: '1,2'}, include: 'author'}
     assert_response :success
     assert_equal 2, json_response['data'].size
     assert_equal 1, json_response['included'].size
@@ -188,30 +189,28 @@ class PostsControllerTest < ActionController::TestCase
 
   def test_index_filter_not_allowed
     JSONAPI.configuration.allow_filter = false
-    get :index, params: {filter: {id: '1'}}
+    assert_cacheable_get :index, params: {filter: {id: '1'}}
     assert_response :bad_request
   ensure
     JSONAPI.configuration.allow_filter = true
   end
 
   def test_index_include_one_level_query_count
-    count_queries do
-      get :index, params: {include: 'author'}
+    assert_query_count(2) do
+      assert_cacheable_get :index, params: {include: 'author'}
     end
     assert_response :success
-    assert_query_count(2)
   end
 
   def test_index_include_two_levels_query_count
-    count_queries do
-      get :index, params: {include: 'author,author.comments'}
+    assert_query_count(3) do
+      assert_cacheable_get :index, params: {include: 'author,author.comments'}
     end
     assert_response :success
-    assert_query_count(3)
   end
 
   def test_index_filter_by_ids_and_fields
-    get :index, params: {filter: {id: '1,2'}, fields: {posts: 'id,title,author'}}
+    assert_cacheable_get :index, params: {filter: {id: '1,2'}, fields: {posts: 'id,title,author'}}
     assert_response :success
     assert_equal 2, json_response['data'].size
 
@@ -224,7 +223,7 @@ class PostsControllerTest < ActionController::TestCase
   end
 
   def test_index_filter_by_ids_and_fields_specify_type
-    get :index, params: {filter: {id: '1,2'}, 'fields' => {'posts' => 'id,title,author'}}
+    assert_cacheable_get :index, params: {filter: {id: '1,2'}, 'fields' => {'posts' => 'id,title,author'}}
     assert_response :success
     assert_equal 2, json_response['data'].size
 
@@ -237,13 +236,13 @@ class PostsControllerTest < ActionController::TestCase
   end
 
   def test_index_filter_by_ids_and_fields_specify_unrelated_type
-    get :index, params: {filter: {id: '1,2'}, 'fields' => {'currencies' => 'code'}}
+    assert_cacheable_get :index, params: {filter: {id: '1,2'}, 'fields' => {'currencies' => 'code'}}
     assert_response :bad_request
     assert_match /currencies is not a valid resource./, json_response['errors'][0]['detail']
   end
 
   def test_index_filter_by_ids_and_fields_2
-    get :index, params: {filter: {id: '1,2'}, fields: {posts: 'author'}}
+    assert_cacheable_get :index, params: {filter: {id: '1,2'}, fields: {posts: 'author'}}
     assert_response :success
     assert_equal 2, json_response['data'].size
 
@@ -255,10 +254,9 @@ class PostsControllerTest < ActionController::TestCase
   end
 
   def test_filter_relationship_single
-    count_queries do
-      get :index, params: {filter: {tags: '5,1'}}
+    assert_query_count(1) do
+      assert_cacheable_get :index, params: {filter: {tags: '5,1'}}
     end
-    assert_query_count(1)
     assert_response :success
     assert_equal 3, json_response['data'].size
     assert_match /New post/, response.body
@@ -267,91 +265,90 @@ class PostsControllerTest < ActionController::TestCase
   end
 
   def test_filter_relationships_multiple
-    count_queries do
-      get :index, params: {filter: {tags: '5,1', comments: '3'}}
+    assert_query_count(1) do
+      assert_cacheable_get :index, params: {filter: {tags: '5,1', comments: '3'}}
     end
-    assert_query_count(1)
     assert_response :success
     assert_equal 1, json_response['data'].size
     assert_match /JR Solves your serialization woes!/, response.body
   end
 
   def test_filter_relationships_multiple_not_found
-    get :index, params: {filter: {tags: '1', comments: '3'}}
+    assert_cacheable_get :index, params: {filter: {tags: '1', comments: '3'}}
     assert_response :success
     assert_equal 0, json_response['data'].size
   end
 
   def test_bad_filter
-    get :index, params: {filter: {post_ids: '1,2'}}
+    assert_cacheable_get :index, params: {filter: {post_ids: '1,2'}}
     assert_response :bad_request
     assert_match /post_ids is not allowed/, response.body
   end
 
   def test_bad_filter_value_not_integer_array
-    get :index, params: {filter: {id: 'asdfg'}}
+    assert_cacheable_get :index, params: {filter: {id: 'asdfg'}}
     assert_response :bad_request
     assert_match /asdfg is not a valid value for id/, response.body
   end
 
   def test_bad_filter_value_not_integer
-    get :index, params: {filter: {id: 'asdfg'}}
+    assert_cacheable_get :index, params: {filter: {id: 'asdfg'}}
     assert_response :bad_request
     assert_match /asdfg is not a valid value for id/, response.body
   end
 
   def test_bad_filter_value_not_found_array
-    get :index, params: {filter: {id: '5412333'}}
+    assert_cacheable_get :index, params: {filter: {id: '5412333'}}
     assert_response :not_found
     assert_match /5412333 could not be found/, response.body
   end
 
   def test_bad_filter_value_not_found
-    get :index, params: {filter: {id: '5412333'}}
+    assert_cacheable_get :index, params: {filter: {id: '5412333'}}
     assert_response :not_found
     assert_match /5412333 could not be found/, json_response['errors'][0]['detail']
   end
 
   def test_field_not_supported
-    get :index, params: {filter: {id: '1,2'}, 'fields' => {'posts' => 'id,title,rank,author'}}
+    assert_cacheable_get :index, params: {filter: {id: '1,2'}, 'fields' => {'posts' => 'id,title,rank,author'}}
     assert_response :bad_request
     assert_match /rank is not a valid field for posts./, json_response['errors'][0]['detail']
   end
 
   def test_resource_not_supported
-    get :index, params: {filter: {id: '1,2'}, 'fields' => {'posters' => 'id,title'}}
+    assert_cacheable_get :index, params: {filter: {id: '1,2'}, 'fields' => {'posters' => 'id,title'}}
     assert_response :bad_request
     assert_match /posters is not a valid resource./, json_response['errors'][0]['detail']
   end
 
   def test_index_filter_on_relationship
-    get :index, params: {filter: {author: '1'}}
+    assert_cacheable_get :index, params: {filter: {author: '1'}}
     assert_response :success
     assert_equal 3, json_response['data'].size
   end
 
   def test_sorting_blank
-    get :index, params: {sort: ''}
+    assert_cacheable_get :index, params: {sort: ''}
 
     assert_response :success
   end
 
   def test_sorting_asc
-    get :index, params: {sort: 'title'}
+    assert_cacheable_get :index, params: {sort: 'title'}
 
     assert_response :success
     assert_equal "A First Post", json_response['data'][0]['attributes']['title']
   end
 
   def test_sorting_desc
-    get :index, params: {sort: '-title'}
+    assert_cacheable_get :index, params: {sort: '-title'}
 
     assert_response :success
     assert_equal "Update This Later - Multiple", json_response['data'][0]['attributes']['title']
   end
 
   def test_sorting_by_multiple_fields
-    get :index, params: {sort: 'title,body'}
+    assert_cacheable_get :index, params: {sort: 'title,body'}
 
     assert_response :success
     assert_equal '14', json_response['data'][0]['id']
@@ -364,7 +361,7 @@ class PostsControllerTest < ActionController::TestCase
 
   def test_sorting_by_relationship_field
     post  = create_alphabetically_first_user_and_post
-    get :index, params: {sort: 'author.name'}
+    assert_cacheable_get :index, params: {sort: 'author.name'}
 
     assert_response :success
     assert json_response['data'].length > 10, 'there are enough recordsto show sort'
@@ -374,7 +371,7 @@ class PostsControllerTest < ActionController::TestCase
 
   def test_desc_sorting_by_relationship_field
     post  = create_alphabetically_first_user_and_post
-    get :index, params: {sort: '-author.name'}
+    assert_cacheable_get :index, params: {sort: '-author.name'}
 
     assert_response :success
     assert json_response['data'].length > 10, 'there are enough records to show sort'
@@ -383,7 +380,7 @@ class PostsControllerTest < ActionController::TestCase
   end
 
   def test_invalid_sort_param
-    get :index, params: {sort: 'asdfg'}
+    assert_cacheable_get :index, params: {sort: 'asdfg'}
 
     assert_response :bad_request
     assert_match /asdfg is not a valid sort criteria for post/, response.body
@@ -391,21 +388,21 @@ class PostsControllerTest < ActionController::TestCase
 
   def test_show_single_with_sort_disallowed
     JSONAPI.configuration.allow_sort = false
-    get :index, params: {sort: 'title,body'}
+    assert_cacheable_get :index, params: {sort: 'title,body'}
     assert_response :bad_request
   ensure
     JSONAPI.configuration.allow_sort = true
   end
 
   def test_excluded_sort_param
-    get :index, params: {sort: 'id'}
+    assert_cacheable_get :index, params: {sort: 'id'}
 
     assert_response :bad_request
     assert_match /id is not a valid sort criteria for post/, response.body
   end
 
   def test_show_single
-    get :show, params: {id: '1'}
+    assert_cacheable_get :show, params: {id: '1'}
     assert_response :success
     assert json_response['data'].is_a?(Hash)
     assert_equal 'New post', json_response['data']['attributes']['title']
@@ -415,7 +412,7 @@ class PostsControllerTest < ActionController::TestCase
 
   def test_show_does_not_include_records_count_in_meta
     JSONAPI.configuration.top_level_meta_include_record_count = true
-    get :show, params: { id: Post.first.id }
+    assert_cacheable_get :show, params: { id: Post.first.id }
     assert_response :success
     assert_equal json_response['meta'], nil
   ensure
@@ -424,7 +421,7 @@ class PostsControllerTest < ActionController::TestCase
 
   def test_show_does_not_include_pages_count_in_meta
     JSONAPI.configuration.top_level_meta_include_page_count = true
-    get :show, params: { id: Post.first.id }
+    assert_cacheable_get :show, params: { id: Post.first.id }
     assert_response :success
     assert_equal json_response['meta'], nil
   ensure
@@ -432,7 +429,7 @@ class PostsControllerTest < ActionController::TestCase
   end
 
   def test_show_single_with_includes
-    get :show, params: {id: '1', include: 'comments'}
+    assert_cacheable_get :show, params: {id: '1', include: 'comments'}
     assert_response :success
     assert json_response['data'].is_a?(Hash)
     assert_equal 'New post', json_response['data']['attributes']['title']
@@ -445,45 +442,45 @@ class PostsControllerTest < ActionController::TestCase
 
   def test_show_single_with_include_disallowed
     JSONAPI.configuration.allow_include = false
-    get :show, params: {id: '1', include: 'comments'}
+    assert_cacheable_get :show, params: {id: '1', include: 'comments'}
     assert_response :bad_request
   ensure
     JSONAPI.configuration.allow_include = true
   end
 
   def test_show_single_with_fields
-    get :show, params: {id: '1', fields: {posts: 'author'}}
+    assert_cacheable_get :show, params: {id: '1', fields: {posts: 'author'}}
     assert_response :success
     assert json_response['data'].is_a?(Hash)
     assert_nil json_response['data']['attributes']
   end
 
   def test_show_single_with_fields_string
-    get :show, params: {id: '1', fields: 'author'}
+    assert_cacheable_get :show, params: {id: '1', fields: 'author'}
     assert_response :bad_request
     assert_match /Fields must specify a type./, json_response['errors'][0]['detail']
   end
 
   def test_show_single_invalid_id_format
-    get :show, params: {id: 'asdfg'}
+    assert_cacheable_get :show, params: {id: 'asdfg'}
     assert_response :bad_request
     assert_match /asdfg is not a valid value for id/, response.body
   end
 
   def test_show_single_missing_record
-    get :show, params: {id: '5412333'}
+    assert_cacheable_get :show, params: {id: '5412333'}
     assert_response :not_found
     assert_match /record identified by 5412333 could not be found/, response.body
   end
 
   def test_show_malformed_fields_not_list
-    get :show, params: {id: '1', 'fields' => ''}
+    assert_cacheable_get :show, params: {id: '1', 'fields' => ''}
     assert_response :bad_request
     assert_match /Fields must specify a type./, json_response['errors'][0]['detail']
   end
 
   def test_show_malformed_fields_type_not_list
-    get :show, params: {id: '1', 'fields' => {'posts' => ''}}
+    assert_cacheable_get :show, params: {id: '1', 'fields' => {'posts' => ''}}
     assert_response :bad_request
     assert_match /nil is not a valid field for posts./, json_response['errors'][0]['detail']
   end
@@ -1009,6 +1006,8 @@ class PostsControllerTest < ActionController::TestCase
   end
 
   def test_update_remove_links
+    orig_controller = @controller.dup
+
     set_content_type_header!
     put :update, params:
       {
@@ -1028,6 +1027,13 @@ class PostsControllerTest < ActionController::TestCase
       }
 
     assert_response :success
+
+    # FIXME Resetting the controller because ActionController::TestCase only allows you
+    # to test a single controller action per test method; really, this test should be in
+    # an Integration Test instead.
+    @controller = orig_controller
+    setup_controller_request_and_response
+    set_content_type_header!
 
     put :update, params:
       {
@@ -1398,7 +1404,7 @@ class PostsControllerTest < ActionController::TestCase
     assert_equal [], p.tag_ids
   end
 
-  def test_update_mismatched_keys
+  def test_update_mismatch_single_key
     set_content_type_header!
     javascript = Section.find_by(name: 'javascript')
 
@@ -1675,7 +1681,7 @@ class PostsControllerTest < ActionController::TestCase
     assert_match /A key is required/, response.body
   end
 
-  def test_update_mismatch_keys
+  def test_update_mismatch_multiple_keys
     set_content_type_header!
     javascript = Section.find_by(name: 'javascript')
 
@@ -1820,7 +1826,7 @@ class PostsControllerTest < ActionController::TestCase
   end
 
   def test_show_to_one_relationship
-    get :show_relationship, params: {post_id: '1', relationship: 'author'}
+    assert_cacheable_get :show_relationship, params: {post_id: '1', relationship: 'author'}
     assert_response :success
     assert_hash_equals json_response,
                        {data: {
@@ -1835,7 +1841,7 @@ class PostsControllerTest < ActionController::TestCase
   end
 
   def test_show_to_many_relationship
-    get :show_relationship, params: {post_id: '2', relationship: 'tags'}
+    assert_cacheable_get :show_relationship, params: {post_id: '2', relationship: 'tags'}
     assert_response :success
     assert_hash_equals json_response,
                        {
@@ -1850,13 +1856,13 @@ class PostsControllerTest < ActionController::TestCase
   end
 
   def test_show_to_many_relationship_invalid_id
-    get :show_relationship, params: {post_id: '2,1', relationship: 'tags'}
+    assert_cacheable_get :show_relationship, params: {post_id: '2,1', relationship: 'tags'}
     assert_response :bad_request
     assert_match /2,1 is not a valid value for id/, response.body
   end
 
   def test_show_to_one_relationship_nil
-    get :show_relationship, params: {post_id: '17', relationship: 'author'}
+    assert_cacheable_get :show_relationship, params: {post_id: '17', relationship: 'author'}
     assert_response :success
     assert_hash_equals json_response,
                        {
@@ -1871,32 +1877,32 @@ end
 
 class TagsControllerTest < ActionController::TestCase
   def test_tags_index
-    get :index, params: {filter: {id: '6,7,8,9'}, include: 'posts.tags,posts.author.posts'}
+    assert_cacheable_get :index, params: {filter: {id: '6,7,8,9'}, include: 'posts.tags,posts.author.posts'}
     assert_response :success
     assert_equal 4, json_response['data'].size
     assert_equal 3, json_response['included'].size
   end
 
   def test_tags_show_multiple
-    get :show, params: {id: '6,7,8,9'}
+    assert_cacheable_get :show, params: {id: '6,7,8,9'}
     assert_response :bad_request
     assert_match /6,7,8,9 is not a valid value for id/, response.body
   end
 
   def test_tags_show_multiple_with_include
-    get :show, params: {id: '6,7,8,9', include: 'posts.tags,posts.author.posts'}
+    assert_cacheable_get :show, params: {id: '6,7,8,9', include: 'posts.tags,posts.author.posts'}
     assert_response :bad_request
     assert_match /6,7,8,9 is not a valid value for id/, response.body
   end
 
   def test_tags_show_multiple_with_nonexistent_ids
-    get :show, params: {id: '6,99,9,100'}
+    assert_cacheable_get :show, params: {id: '6,99,9,100'}
     assert_response :bad_request
     assert_match /6,99,9,100 is not a valid value for id/, response.body
   end
 
   def test_tags_show_multiple_with_nonexistent_ids_at_the_beginning
-    get :show, params: {id: '99,9,100'}
+    assert_cacheable_get :show, params: {id: '99,9,100'}
     assert_response :bad_request
     assert_match /99,9,100 is not a valid value for id/, response.body
   end
@@ -1909,7 +1915,7 @@ class ExpenseEntriesControllerTest < ActionController::TestCase
 
   def test_text_error
     JSONAPI.configuration.use_text_errors = true
-    get :index, params: {sort: 'not_in_record'}
+    assert_cacheable_get :index, params: {sort: 'not_in_record'}
     assert_response 400
     assert_equal 'INVALID_SORT_CRITERIA', json_response['errors'][0]['code']
   ensure
@@ -1917,48 +1923,48 @@ class ExpenseEntriesControllerTest < ActionController::TestCase
   end
 
   def test_expense_entries_index
-    get :index
+    assert_cacheable_get :index
     assert_response :success
     assert json_response['data'].is_a?(Array)
     assert_equal 2, json_response['data'].size
   end
 
   def test_expense_entries_show
-    get :show, params: {id: 1}
+    assert_cacheable_get :show, params: {id: 1}
     assert_response :success
     assert json_response['data'].is_a?(Hash)
   end
 
   def test_expense_entries_show_include
-    get :show, params: {id: 1, include: 'isoCurrency,employee'}
+    assert_cacheable_get :show, params: {id: 1, include: 'isoCurrency,employee'}
     assert_response :success
     assert json_response['data'].is_a?(Hash)
     assert_equal 2, json_response['included'].size
   end
 
   def test_expense_entries_show_bad_include_missing_relationship
-    get :show, params: {id: 1, include: 'isoCurrencies,employees'}
+    assert_cacheable_get :show, params: {id: 1, include: 'isoCurrencies,employees'}
     assert_response :bad_request
     assert_match /isoCurrencies is not a valid relationship of expenseEntries/, json_response['errors'][0]['detail']
     assert_match /employees is not a valid relationship of expenseEntries/, json_response['errors'][1]['detail']
   end
 
   def test_expense_entries_show_bad_include_missing_sub_relationship
-    get :show, params: {id: 1, include: 'isoCurrency,employee.post'}
+    assert_cacheable_get :show, params: {id: 1, include: 'isoCurrency,employee.post'}
     assert_response :bad_request
     assert_match /post is not a valid relationship of people/, json_response['errors'][0]['detail']
   end
 
   def test_expense_entries_show_fields
-    get :show, params: {id: 1, include: 'isoCurrency,employee', 'fields' => {'expenseEntries' => 'transactionDate'}}
+    assert_cacheable_get :show, params: {id: 1, include: 'isoCurrency,employee', 'fields' => {'expenseEntries' => 'transactionDate'}}
     assert_response :success
     assert json_response['data'].is_a?(Hash)
-    assert json_response['data']['attributes'].key?('transactionDate')
+    assert_equal ['transactionDate'], json_response['data']['attributes'].keys
     assert_equal 2, json_response['included'].size
   end
 
   def test_expense_entries_show_fields_type_many
-    get :show, params: {id: 1, include: 'isoCurrency,employee', 'fields' => {'expenseEntries' => 'transactionDate',
+    assert_cacheable_get :show, params: {id: 1, include: 'isoCurrency,employee', 'fields' => {'expenseEntries' => 'transactionDate',
                                                                              'isoCurrencies' => 'id,name'}}
     assert_response :success
     assert json_response['data'].is_a?(Hash)
@@ -2075,7 +2081,7 @@ class IsoCurrenciesControllerTest < ActionController::TestCase
   end
 
   def test_currencies_show
-    get :show, params: {id: 'USD'}
+    assert_cacheable_get :show, params: {id: 'USD'}
     assert_response :success
     assert json_response['data'].is_a?(Hash)
   end
@@ -2111,7 +2117,7 @@ class IsoCurrenciesControllerTest < ActionController::TestCase
   end
 
   def test_currencies_primary_key_sort
-    get :index, params: {sort: 'id'}
+    assert_cacheable_get :index, params: {sort: 'id'}
     assert_response :success
     assert_equal 3, json_response['data'].size
     assert_equal 'CAD', json_response['data'][0]['id']
@@ -2120,14 +2126,14 @@ class IsoCurrenciesControllerTest < ActionController::TestCase
   end
 
   def test_currencies_code_sort
-    get :index, params: {sort: 'code'}
+    assert_cacheable_get :index, params: {sort: 'code'}
     assert_response :bad_request
   end
 
   def test_currencies_json_key_underscored_sort
     original_config = JSONAPI.configuration.dup
     JSONAPI.configuration.json_key_format = :underscored_key
-    get :index, params: {sort: 'country_name'}
+    assert_cacheable_get :index, params: {sort: 'country_name'}
     assert_response :success
     assert_equal 3, json_response['data'].size
     assert_equal 'Canada', json_response['data'][0]['attributes']['country_name']
@@ -2135,7 +2141,7 @@ class IsoCurrenciesControllerTest < ActionController::TestCase
     assert_equal 'United States', json_response['data'][2]['attributes']['country_name']
 
     # reverse sort
-    get :index, params: {sort: '-country_name'}
+    assert_cacheable_get :index, params: {sort: '-country_name'}
     assert_response :success
     assert_equal 3, json_response['data'].size
     assert_equal 'United States', json_response['data'][0]['attributes']['country_name']
@@ -2148,7 +2154,7 @@ class IsoCurrenciesControllerTest < ActionController::TestCase
   def test_currencies_json_key_dasherized_sort
     original_config = JSONAPI.configuration.dup
     JSONAPI.configuration.json_key_format = :dasherized_key
-    get :index, params: {sort: 'country-name'}
+    assert_cacheable_get :index, params: {sort: 'country-name'}
     assert_response :success
     assert_equal 3, json_response['data'].size
     assert_equal 'Canada', json_response['data'][0]['attributes']['country-name']
@@ -2156,7 +2162,7 @@ class IsoCurrenciesControllerTest < ActionController::TestCase
     assert_equal 'United States', json_response['data'][2]['attributes']['country-name']
 
     # reverse sort
-    get :index, params: {sort: '-country-name'}
+    assert_cacheable_get :index, params: {sort: '-country-name'}
     assert_response :success
     assert_equal 3, json_response['data'].size
     assert_equal 'United States', json_response['data'][0]['attributes']['country-name']
@@ -2169,7 +2175,7 @@ class IsoCurrenciesControllerTest < ActionController::TestCase
   def test_currencies_json_key_custom_json_key_sort
     original_config = JSONAPI.configuration.dup
     JSONAPI.configuration.json_key_format = :upper_camelized_key
-    get :index, params: {sort: 'CountryName'}
+    assert_cacheable_get :index, params: {sort: 'CountryName'}
     assert_response :success
     assert_equal 3, json_response['data'].size
     assert_equal 'Canada', json_response['data'][0]['attributes']['CountryName']
@@ -2177,7 +2183,7 @@ class IsoCurrenciesControllerTest < ActionController::TestCase
     assert_equal 'United States', json_response['data'][2]['attributes']['CountryName']
 
     # reverse sort
-    get :index, params: {sort: '-CountryName'}
+    assert_cacheable_get :index, params: {sort: '-CountryName'}
     assert_response :success
     assert_equal 3, json_response['data'].size
     assert_equal 'United States', json_response['data'][0]['attributes']['CountryName']
@@ -2190,7 +2196,7 @@ class IsoCurrenciesControllerTest < ActionController::TestCase
   def test_currencies_json_key_underscored_filter
     original_config = JSONAPI.configuration.dup
     JSONAPI.configuration.json_key_format = :underscored_key
-    get :index, params: {filter: {country_name: 'Canada'}}
+    assert_cacheable_get :index, params: {filter: {country_name: 'Canada'}}
     assert_response :success
     assert_equal 1, json_response['data'].size
     assert_equal 'Canada', json_response['data'][0]['attributes']['country_name']
@@ -2201,7 +2207,7 @@ class IsoCurrenciesControllerTest < ActionController::TestCase
   def test_currencies_json_key_camelized_key_filter
     original_config = JSONAPI.configuration.dup
     JSONAPI.configuration.json_key_format = :camelized_key
-    get :index, params: {filter: {'countryName' => 'Canada'}}
+    assert_cacheable_get :index, params: {filter: {'countryName' => 'Canada'}}
     assert_response :success
     assert_equal 1, json_response['data'].size
     assert_equal 'Canada', json_response['data'][0]['attributes']['countryName']
@@ -2212,7 +2218,7 @@ class IsoCurrenciesControllerTest < ActionController::TestCase
   def test_currencies_json_key_custom_json_key_filter
     original_config = JSONAPI.configuration.dup
     JSONAPI.configuration.json_key_format = :upper_camelized_key
-    get :index, params: {filter: {'CountryName' => 'Canada'}}
+    assert_cacheable_get :index, params: {filter: {'CountryName' => 'Canada'}}
     assert_response :success
     assert_equal 1, json_response['data'].size
     assert_equal 'Canada', json_response['data'][0]['attributes']['CountryName']
@@ -2316,12 +2322,12 @@ class PeopleControllerTest < ActionController::TestCase
   end
 
   def test_invalid_filter_value
-    get :index, params: {filter: {name: 'L'}}
+    assert_cacheable_get :index, params: {filter: {name: 'L'}}
     assert_response :bad_request
   end
 
   def test_valid_filter_value
-    get :index, params: {filter: {name: 'Joe Author'}}
+    assert_cacheable_get :index, params: {filter: {name: 'Joe Author'}}
     assert_response :success
     assert_equal json_response['data'].size, 1
     assert_equal json_response['data'][0]['id'], '1'
@@ -2332,7 +2338,7 @@ class PeopleControllerTest < ActionController::TestCase
     original_config = JSONAPI.configuration.dup
     JSONAPI.configuration.json_key_format = :dasherized_key
     JSONAPI.configuration.route_format = :underscored_key
-    get :get_related_resource, params: {post_id: '2', relationship: 'author', source:'posts'}
+    assert_cacheable_get :get_related_resource, params: {post_id: '2', relationship: 'author', source:'posts'}
     assert_response :success
     assert_hash_equals(
       {
@@ -2388,7 +2394,7 @@ class PeopleControllerTest < ActionController::TestCase
   end
 
   def test_get_related_resource_nil
-    get :get_related_resource, params: {post_id: '17', relationship: 'author', source:'posts'}
+    assert_cacheable_get :get_related_resource, params: {post_id: '17', relationship: 'author', source:'posts'}
     assert_response :success
     assert_hash_equals json_response,
                        {
@@ -2401,7 +2407,7 @@ end
 class BooksControllerTest < ActionController::TestCase
   def test_books_include_correct_type
     $test_user = Person.find(1)
-    get :index, params: {filter: {id: '1'}, include: 'authors'}
+    assert_cacheable_get :index, params: {filter: {id: '1'}, include: 'authors'}
     assert_response :success
     assert_equal 'authors', json_response['included'][0]['type']
   end
@@ -2409,7 +2415,7 @@ end
 
 class Api::V5::AuthorsControllerTest < ActionController::TestCase
   def test_get_person_as_author
-    get :index, params: {filter: {id: '1'}}
+    assert_cacheable_get :index, params: {filter: {id: '1'}}
     assert_response :success
     assert_equal 1, json_response['data'].size
     assert_equal '1', json_response['data'][0]['id']
@@ -2419,7 +2425,7 @@ class Api::V5::AuthorsControllerTest < ActionController::TestCase
   end
 
   def test_show_person_as_author
-    get :show, params: {id: '1'}
+    assert_cacheable_get :show, params: {id: '1'}
     assert_response :success
     assert_equal '1', json_response['data']['id']
     assert_equal 'authors', json_response['data']['type']
@@ -2428,7 +2434,7 @@ class Api::V5::AuthorsControllerTest < ActionController::TestCase
   end
 
   def test_get_person_as_author_by_name_filter
-    get :index, params: {filter: {name: 'thor'}}
+    assert_cacheable_get :index, params: {filter: {name: 'thor'}}
     assert_response :success
     assert_equal 3, json_response['data'].size
     assert_equal '1', json_response['data'][0]['id']
@@ -2449,7 +2455,7 @@ class Api::V5::AuthorsControllerTest < ActionController::TestCase
       end
     end
 
-    get :show, params: {id: '1'}
+    assert_cacheable_get :show, params: {id: '1'}
     assert_response :success
     assert_equal '1', json_response['data']['id']
     assert_equal 'Hardcoded value', json_response['data']['meta']['fixed']
@@ -2484,7 +2490,7 @@ class Api::V5::AuthorsControllerTest < ActionController::TestCase
       end
     end
 
-    get :show, params: {id: '1'}
+    assert_cacheable_get :show, params: {id: '1'}
     assert_response :success
     assert_equal '1', json_response['data']['id']
     assert_equal 'Hardcoded value', json_response['data']['meta']['custom_hash']['fixed']
@@ -2508,14 +2514,14 @@ class BreedsControllerTest < ActionController::TestCase
   # Note: Breed names go through the TitleValueFormatter
 
   def test_poro_index
-    get :index
+    assert_cacheable_get :index
     assert_response :success
     assert_equal '0', json_response['data'][0]['id']
     assert_equal 'Persian', json_response['data'][0]['attributes']['name']
   end
 
   def test_poro_show
-    get :show, params: {id: '0'}
+    assert_cacheable_get :show, params: {id: '0'}
     assert_response :success
     assert json_response['data'].is_a?(Hash)
     assert_equal '0', json_response['data']['id']
@@ -2523,7 +2529,7 @@ class BreedsControllerTest < ActionController::TestCase
   end
 
   def test_poro_show_multiple
-    get :show, params: {id: '0,2'}
+    assert_cacheable_get :show, params: {id: '0,2'}
 
     assert_response :bad_request
     assert_match /0,2 is not a valid value for id/, response.body
@@ -2606,7 +2612,7 @@ end
 
 class Api::V2::PreferencesControllerTest < ActionController::TestCase
   def test_show_singleton_resource_without_id
-    get :show
+    assert_cacheable_get :show
     assert_response :success
   end
 
@@ -2626,13 +2632,13 @@ end
 
 class Api::V1::PostsControllerTest < ActionController::TestCase
   def test_show_post_namespaced
-    get :show, params: {id: '1'}
+    assert_cacheable_get :show, params: {id: '1'}
     assert_response :success
     assert_equal 'http://test.host/api/v1/posts/1/relationships/writer', json_response['data']['relationships']['writer']['links']['self']
   end
 
   def test_show_post_namespaced_include
-    get :show, params: {id: '1', include: 'writer'}
+    assert_cacheable_get :show, params: {id: '1', include: 'writer'}
     assert_response :success
     assert_equal '1', json_response['data']['relationships']['writer']['data']['id']
     assert_nil json_response['data']['relationships']['tags']
@@ -2642,13 +2648,13 @@ class Api::V1::PostsControllerTest < ActionController::TestCase
   end
 
   def test_index_filter_on_relationship_namespaced
-    get :index, params: {filter: {writer: '1'}}
+    assert_cacheable_get :index, params: {filter: {writer: '1'}}
     assert_response :success
     assert_equal 3, json_response['data'].size
   end
 
   def test_sorting_desc_namespaced
-    get :index, params: {sort: '-title'}
+    assert_cacheable_get :index, params: {sort: '-title'}
 
     assert_response :success
     assert_equal "Update This Later - Multiple", json_response['data'][0]['attributes']['title']
@@ -2683,16 +2689,16 @@ class FactsControllerTest < ActionController::TestCase
   def test_type_formatting
     original_config = JSONAPI.configuration.dup
     JSONAPI.configuration.json_key_format = :camelized_key
-    get :show, params: {id: '1'}
+    assert_cacheable_get :show, params: {id: '1'}
     assert_response :success
     assert json_response['data'].is_a?(Hash)
     assert_equal 'Jane Author', json_response['data']['attributes']['spouseName']
     assert_equal 'First man to run across Antartica.', json_response['data']['attributes']['bio']
     assert_equal 23.89/45.6, json_response['data']['attributes']['qualityRating']
     assert_equal '47000.56', json_response['data']['attributes']['salary']
-    assert_equal '2013-08-07T20:25:00Z', json_response['data']['attributes']['dateTimeJoined']
+    assert_equal '2013-08-07T20:25:00.000Z', json_response['data']['attributes']['dateTimeJoined']
     assert_equal '1965-06-30', json_response['data']['attributes']['birthday']
-    assert_equal '2000-01-01T20:00:00Z', json_response['data']['attributes']['bedtime']
+    assert_equal '2000-01-01T20:00:00.000Z', json_response['data']['attributes']['bedtime']
     assert_equal 'abc', json_response['data']['attributes']['photo']
     assert_equal false, json_response['data']['attributes']['cool']
   ensure
@@ -2750,7 +2756,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_offset_pagination_no_params
     Api::V2::BookResource.paginator :offset
 
-    get :index
+    assert_cacheable_get :index
     assert_response :success
     assert_equal 10, json_response['data'].size
     assert_equal 'Book 0', json_response['data'][0]['attributes']['title']
@@ -2759,7 +2765,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_record_count_in_meta
     Api::V2::BookResource.paginator :offset
     JSONAPI.configuration.top_level_meta_include_record_count = true
-    get :index, params: {include: 'book-comments'}
+    assert_cacheable_get :index, params: {include: 'book-comments'}
     JSONAPI.configuration.top_level_meta_include_record_count = false
 
     assert_response :success
@@ -2771,7 +2777,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_page_count_in_meta
     Api::V2::BookResource.paginator :paged
     JSONAPI.configuration.top_level_meta_include_page_count = true
-    get :index, params: {include: 'book-comments'}
+    assert_cacheable_get :index, params: {include: 'book-comments'}
     JSONAPI.configuration.top_level_meta_include_page_count = false
 
     assert_response :success
@@ -2785,7 +2791,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
     JSONAPI.configuration.top_level_meta_include_record_count = true
     JSONAPI.configuration.top_level_meta_record_count_key = 'total_records'
 
-    get :index, params: {include: 'book-comments'}
+    assert_cacheable_get :index, params: {include: 'book-comments'}
     JSONAPI.configuration.top_level_meta_include_record_count = false
     JSONAPI.configuration.top_level_meta_record_count_key = :record_count
 
@@ -2800,7 +2806,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
     JSONAPI.configuration.top_level_meta_include_page_count = true
     JSONAPI.configuration.top_level_meta_page_count_key = 'total_pages'
 
-    get :index, params: {include: 'book-comments'}
+    assert_cacheable_get :index, params: {include: 'book-comments'}
     JSONAPI.configuration.top_level_meta_include_page_count = false
     JSONAPI.configuration.top_level_meta_page_count_key = :page_count
 
@@ -2813,31 +2819,29 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_offset_pagination_no_params_includes_query_count_one_level
     Api::V2::BookResource.paginator :offset
 
-    count_queries do
-      get :index, params: {include: 'book-comments'}
+    assert_query_count(3) do
+      assert_cacheable_get :index, params: {include: 'book-comments'}
     end
     assert_response :success
     assert_equal 10, json_response['data'].size
     assert_equal 'Book 0', json_response['data'][0]['attributes']['title']
-    assert_query_count(3)
   end
 
   def test_books_offset_pagination_no_params_includes_query_count_two_levels
     Api::V2::BookResource.paginator :offset
 
-    count_queries do
-      get :index, params: {include: 'book-comments,book-comments.author'}
+    assert_query_count(4) do
+      assert_cacheable_get :index, params: {include: 'book-comments,book-comments.author'}
     end
     assert_response :success
     assert_equal 10, json_response['data'].size
     assert_equal 'Book 0', json_response['data'][0]['attributes']['title']
-    assert_query_count(4)
   end
 
   def test_books_offset_pagination
     Api::V2::BookResource.paginator :offset
 
-    get :index, params: {page: {offset: 50, limit: 12}}
+    assert_cacheable_get :index, params: {page: {offset: 50, limit: 12}}
     assert_response :success
     assert_equal 12, json_response['data'].size
     assert_equal 'Book 50', json_response['data'][0]['attributes']['title']
@@ -2846,7 +2850,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_offset_pagination_bad_page_param
     Api::V2::BookResource.paginator :offset
 
-    get :index, params: {page: {offset_bad: 50, limit: 12}}
+    assert_cacheable_get :index, params: {page: {offset_bad: 50, limit: 12}}
     assert_response :bad_request
     assert_match /offset_bad is not an allowed page parameter./, json_response['errors'][0]['detail']
   end
@@ -2854,7 +2858,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_offset_pagination_bad_param_value_limit_to_large
     Api::V2::BookResource.paginator :offset
 
-    get :index, params: {page: {offset: 50, limit: 1000}}
+    assert_cacheable_get :index, params: {page: {offset: 50, limit: 1000}}
     assert_response :bad_request
     assert_match /Limit exceeds maximum page size of 20./, json_response['errors'][0]['detail']
   end
@@ -2862,7 +2866,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_offset_pagination_bad_param_value_limit_too_small
     Api::V2::BookResource.paginator :offset
 
-    get :index, params: {page: {offset: 50, limit: -1}}
+    assert_cacheable_get :index, params: {page: {offset: 50, limit: -1}}
     assert_response :bad_request
     assert_match /-1 is not a valid value for limit page parameter./, json_response['errors'][0]['detail']
   end
@@ -2870,7 +2874,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_offset_pagination_bad_param_offset_less_than_zero
     Api::V2::BookResource.paginator :offset
 
-    get :index, params: {page: {offset: -1, limit: 20}}
+    assert_cacheable_get :index, params: {page: {offset: -1, limit: 20}}
     assert_response :bad_request
     assert_match /-1 is not a valid value for offset page parameter./, json_response['errors'][0]['detail']
   end
@@ -2878,7 +2882,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_offset_pagination_invalid_page_format
     Api::V2::BookResource.paginator :offset
 
-    get :index, params: {page: 50}
+    assert_cacheable_get :index, params: {page: 50}
     assert_response :bad_request
     assert_match /Invalid Page Object./, json_response['errors'][0]['detail']
   end
@@ -2886,7 +2890,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_paged_pagination_no_params
     Api::V2::BookResource.paginator :paged
 
-    get :index
+    assert_cacheable_get :index
     assert_response :success
     assert_equal 10, json_response['data'].size
     assert_equal 'Book 0', json_response['data'][0]['attributes']['title']
@@ -2895,7 +2899,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_paged_pagination_no_page
     Api::V2::BookResource.paginator :paged
 
-    get :index, params: {page: {size: 12}}
+    assert_cacheable_get :index, params: {page: {size: 12}}
     assert_response :success
     assert_equal 12, json_response['data'].size
     assert_equal 'Book 0', json_response['data'][0]['attributes']['title']
@@ -2904,7 +2908,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_paged_pagination
     Api::V2::BookResource.paginator :paged
 
-    get :index, params: {page: {number: 3, size: 12}}
+    assert_cacheable_get :index, params: {page: {number: 3, size: 12}}
     assert_response :success
     assert_equal 12, json_response['data'].size
     assert_equal 'Book 24', json_response['data'][0]['attributes']['title']
@@ -2913,7 +2917,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_paged_pagination_bad_page_param
     Api::V2::BookResource.paginator :paged
 
-    get :index, params: {page: {number_bad: 50, size: 12}}
+    assert_cacheable_get :index, params: {page: {number_bad: 50, size: 12}}
     assert_response :bad_request
     assert_match /number_bad is not an allowed page parameter./, json_response['errors'][0]['detail']
   end
@@ -2921,7 +2925,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_paged_pagination_bad_param_value_limit_to_large
     Api::V2::BookResource.paginator :paged
 
-    get :index, params: {page: {number: 50, size: 1000}}
+    assert_cacheable_get :index, params: {page: {number: 50, size: 1000}}
     assert_response :bad_request
     assert_match /size exceeds maximum page size of 20./, json_response['errors'][0]['detail']
   end
@@ -2929,7 +2933,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_paged_pagination_bad_param_value_limit_too_small
     Api::V2::BookResource.paginator :paged
 
-    get :index, params: {page: {number: 50, size: -1}}
+    assert_cacheable_get :index, params: {page: {number: 50, size: -1}}
     assert_response :bad_request
     assert_match /-1 is not a valid value for size page parameter./, json_response['errors'][0]['detail']
   end
@@ -2937,7 +2941,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_paged_pagination_invalid_page_format_incorrect
     Api::V2::BookResource.paginator :paged
 
-    get :index, params: {page: 'qwerty'}
+    assert_cacheable_get :index, params: {page: 'qwerty'}
     assert_response :bad_request
     assert_match /0 is not a valid value for number page parameter./, json_response['errors'][0]['detail']
   end
@@ -2945,7 +2949,7 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_paged_pagination_invalid_page_format_interpret_int
     Api::V2::BookResource.paginator :paged
 
-    get :index, params: {page: 3}
+    assert_cacheable_get :index, params: {page: 3}
     assert_response :success
     assert_equal 10, json_response['data'].size
     assert_equal 'Book 20', json_response['data'][0]['attributes']['title']
@@ -2954,27 +2958,25 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
   def test_books_included_paged
     Api::V2::BookResource.paginator :offset
 
-    count_queries do
-      get :index, params: {filter: {id: '0'}, include: 'book-comments'}
+    assert_query_count(3) do
+      assert_cacheable_get :index, params: {filter: {id: '0'}, include: 'book-comments'}
     end
     assert_response :success
     assert_equal 1, json_response['data'].size
     assert_equal 'Book 0', json_response['data'][0]['attributes']['title']
-    assert_query_count(3)
   end
 
   def test_books_banned_non_book_admin
     $test_user = Person.find(1)
     Api::V2::BookResource.paginator :offset
     JSONAPI.configuration.top_level_meta_include_record_count = true
-    count_queries do
-      get :index, params: {page: {offset: 50, limit: 12}}
+    assert_query_count(2) do
+      assert_cacheable_get :index, params: {page: {offset: 50, limit: 12}}
     end
     assert_response :success
     assert_equal 12, json_response['data'].size
     assert_equal 'Book 50', json_response['data'][0]['attributes']['title']
     assert_equal 901, json_response['meta']['record-count']
-    assert_query_count(2)
   ensure
     JSONAPI.configuration.top_level_meta_include_record_count = false
   end
@@ -2983,8 +2985,8 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
     $test_user = Person.find(1)
     Api::V2::BookResource.paginator :offset
     JSONAPI.configuration.top_level_meta_include_record_count = true
-    count_queries do
-      get :index, params: {page: {offset: 0, limit: 12}, include: 'book-comments'}
+    assert_query_count(3) do
+      assert_cacheable_get :index, params: {page: {offset: 0, limit: 12}, include: 'book-comments'}
     end
 
     assert_response :success
@@ -2994,7 +2996,6 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
     assert_equal 26, json_response['data'][0]['relationships']['book-comments']['data'].size
     assert_equal 'book-comments', json_response['included'][0]['type']
     assert_equal 901, json_response['meta']['record-count']
-    assert_query_count(3)
   ensure
     JSONAPI.configuration.top_level_meta_include_record_count = false
   end
@@ -3003,15 +3004,14 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
     $test_user = Person.find(1)
     JSONAPI.configuration.top_level_meta_include_record_count = true
     Api::V2::BookResource.paginator :offset
-    count_queries do
-      get :index, params: {page: {offset: 0, limit: 12}, include: 'book-comments.author'}
+    assert_query_count(4) do
+      assert_cacheable_get :index, params: {page: {offset: 0, limit: 12}, include: 'book-comments.author'}
     end
     assert_response :success
     assert_equal 12, json_response['data'].size
-    assert_equal 131, json_response['included'].size
+    assert_equal 132, json_response['included'].size
     assert_equal 'Book 0', json_response['data'][0]['attributes']['title']
     assert_equal 901, json_response['meta']['record-count']
-    assert_query_count(4)
   ensure
     JSONAPI.configuration.top_level_meta_include_record_count = false
   end
@@ -3020,14 +3020,13 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
     $test_user = Person.find(5)
     Api::V2::BookResource.paginator :offset
     JSONAPI.configuration.top_level_meta_include_record_count = true
-    count_queries do
-      get :index, params: {page: {offset: 50, limit: 12}, filter: {banned: 'true'}}
+    assert_query_count(2) do
+      assert_cacheable_get :index, params: {page: {offset: 50, limit: 12}, filter: {banned: 'true'}}
     end
     assert_response :success
     assert_equal 12, json_response['data'].size
     assert_equal 'Book 651', json_response['data'][0]['attributes']['title']
     assert_equal 99, json_response['meta']['record-count']
-    assert_query_count(2)
   ensure
     JSONAPI.configuration.top_level_meta_include_record_count = false
   end
@@ -3036,14 +3035,13 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
     $test_user = Person.find(5)
     Api::V2::BookResource.paginator :offset
     JSONAPI.configuration.top_level_meta_include_record_count = true
-    count_queries do
-      get :index, params: {page: {offset: 50, limit: 12}, filter: {banned: 'false'}, fields: {books: 'id,title'}}
+    assert_query_count(2) do
+      assert_cacheable_get :index, params: {page: {offset: 50, limit: 12}, filter: {banned: 'false'}, fields: {books: 'id,title'}}
     end
     assert_response :success
     assert_equal 12, json_response['data'].size
     assert_equal 'Book 50', json_response['data'][0]['attributes']['title']
     assert_equal 901, json_response['meta']['record-count']
-    assert_query_count(2)
   ensure
     JSONAPI.configuration.top_level_meta_include_record_count = false
   end
@@ -3052,14 +3050,13 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
     $test_user = Person.find(1)
     Api::V2::BookResource.paginator :offset
     JSONAPI.configuration.top_level_meta_include_record_count = true
-    count_queries do
-      get :index, params: {page: {offset: 590, limit: 20}}
+    assert_query_count(2) do
+      assert_cacheable_get :index, params: {page: {offset: 590, limit: 20}}
     end
     assert_response :success
     assert_equal 20, json_response['data'].size
     assert_equal 'Book 590', json_response['data'][0]['attributes']['title']
     assert_equal 901, json_response['meta']['record-count']
-    assert_query_count(2)
   ensure
     JSONAPI.configuration.top_level_meta_include_record_count = false
   end
@@ -3068,22 +3065,21 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
     $test_user = Person.find(1)
     Api::V2::BookResource.paginator :none
 
-    count_queries do
-      get :index, params: {filter: {id: '0,1,2,3,4'}, include: 'book-comments'}
+    assert_query_count(2) do
+      assert_cacheable_get :index, params: {filter: {id: '0,1,2,3,4'}, include: 'book-comments'}
     end
     assert_response :success
     assert_equal 5, json_response['data'].size
     assert_equal 'Book 0', json_response['data'][0]['attributes']['title']
     assert_equal 130, json_response['included'].size
     assert_equal 26, json_response['data'][0]['relationships']['book-comments']['data'].size
-    assert_query_count(2)
   end
 
   def test_books_included_all_comments_for_admin
     $test_user = Person.find(5)
     Api::V2::BookResource.paginator :none
 
-    get :index, params: {filter: {id: '0,1,2,3,4'}, include: 'book-comments'}
+    assert_cacheable_get :index, params: {filter: {id: '0,1,2,3,4'}, include: 'book-comments'}
     assert_response :success
     assert_equal 5, json_response['data'].size
     assert_equal 'Book 0', json_response['data'][0]['attributes']['title']
@@ -3093,14 +3089,14 @@ class Api::V2::BooksControllerTest < ActionController::TestCase
 
   def test_books_filter_by_book_comment_id_limited_user
     $test_user = Person.find(1)
-    get :index, params: {filter: {book_comments: '0,52' }}
+    assert_cacheable_get :index, params: {filter: {book_comments: '0,52' }}
     assert_response :success
     assert_equal 1, json_response['data'].size
   end
 
   def test_books_filter_by_book_comment_id_admin_user
     $test_user = Person.find(5)
-    get :index, params: {filter: {book_comments: '0,52' }}
+    assert_cacheable_get :index, params: {filter: {book_comments: '0,52' }}
     assert_response :success
     assert_equal 2, json_response['data'].size
   end
@@ -3163,32 +3159,29 @@ class Api::V2::BookCommentsControllerTest < ActionController::TestCase
 
   def test_book_comments_all_for_admin
     $test_user = Person.find(5)
-    count_queries do
-      get :index
+    assert_query_count(1) do
+      assert_cacheable_get :index
     end
     assert_response :success
     assert_equal 255, json_response['data'].size
-    assert_query_count(1)
   end
 
   def test_book_comments_unapproved_context_based
     $test_user = Person.find(5)
-    count_queries do
-      get :index, params: {filter: {approved: 'false'}}
+    assert_query_count(1) do
+      assert_cacheable_get :index, params: {filter: {approved: 'false'}}
     end
     assert_response :success
     assert_equal 125, json_response['data'].size
-    assert_query_count(1)
   end
 
   def test_book_comments_exclude_unapproved_context_based
     $test_user = Person.find(1)
-    count_queries do
-      get :index
+    assert_query_count(1) do
+      assert_cacheable_get :index
     end
     assert_response :success
     assert_equal 130, json_response['data'].size
-    assert_query_count(1)
   end
 end
 
@@ -3200,7 +3193,7 @@ class Api::V4::BooksControllerTest < ActionController::TestCase
   def test_books_offset_pagination_meta
     original_config = JSONAPI.configuration.dup
     Api::V4::BookResource.paginator :offset
-    get :index, params: {page: {offset: 50, limit: 12}}
+    assert_cacheable_get :index, params: {page: {offset: 50, limit: 12}}
     assert_response :success
     assert_equal 12, json_response['data'].size
     assert_equal 'Book 50', json_response['data'][0]['attributes']['title']
@@ -3212,7 +3205,7 @@ class Api::V4::BooksControllerTest < ActionController::TestCase
   def test_books_operation_links
     original_config = JSONAPI.configuration.dup
     Api::V4::BookResource.paginator :offset
-    get :index, params: {page: {offset: 50, limit: 12}}
+    assert_cacheable_get :index, params: {page: {offset: 50, limit: 12}}
     assert_response :success
     assert_equal 12, json_response['data'].size
     assert_equal 'Book 50', json_response['data'][0]['attributes']['title']
@@ -3225,14 +3218,14 @@ end
 
 class CategoriesControllerTest < ActionController::TestCase
   def test_index_default_filter
-    get :index
+    assert_cacheable_get :index
     assert_response :success
     assert json_response['data'].is_a?(Array)
     assert_equal 3, json_response['data'].size
   end
 
   def test_index_default_filter_override
-    get :index, params: { filter: { status: 'inactive' } }
+    assert_cacheable_get :index, params: { filter: { status: 'inactive' } }
     assert_response :success
     assert json_response['data'].is_a?(Array)
     assert_equal 4, json_response['data'].size
@@ -3278,7 +3271,7 @@ end
 
 class Api::V1::MoonsControllerTest < ActionController::TestCase
   def test_get_related_resource
-    get :get_related_resource, params: {crater_id: 'S56D', relationship: 'moon', source: "api/v1/craters"}
+    assert_cacheable_get :get_related_resource, params: {crater_id: 'S56D', relationship: 'moon', source: "api/v1/craters"}
     assert_response :success
     assert_hash_equals({
                          data: {
@@ -3298,7 +3291,7 @@ class Api::V1::MoonsControllerTest < ActionController::TestCase
     original_config = JSONAPI.configuration.dup
     JSONAPI.configuration.top_level_meta_include_record_count = true
     JSONAPI.configuration.json_key_format = :dasherized_key
-    get :get_related_resources, params: {planet_id: '1', relationship: 'moons', source: 'api/v1/planets'}
+    assert_cacheable_get :get_related_resources, params: {planet_id: '1', relationship: 'moons', source: 'api/v1/planets'}
     assert_response :success
     assert_equal 1, json_response['meta']['record-count']
   ensure
@@ -3308,7 +3301,7 @@ end
 
 class Api::V1::CratersControllerTest < ActionController::TestCase
   def test_show_single
-    get :show, params: {id: 'S56D'}
+    assert_cacheable_get :show, params: {id: 'S56D'}
     assert_response :success
     assert json_response['data'].is_a?(Hash)
     assert_equal 'S56D', json_response['data']['attributes']['code']
@@ -3317,7 +3310,7 @@ class Api::V1::CratersControllerTest < ActionController::TestCase
   end
 
   def test_get_related_resources
-    get :get_related_resources, params: {moon_id: '1', relationship: 'craters', source: "api/v1/moons"}
+    assert_cacheable_get :get_related_resources, params: {moon_id: '1', relationship: 'craters', source: "api/v1/moons"}
     assert_response :success
     assert_hash_equals({
                          data: [
@@ -3340,7 +3333,7 @@ class Api::V1::CratersControllerTest < ActionController::TestCase
   end
 
   def test_show_relationship
-    get :show_relationship, params: {crater_id: 'S56D', relationship: 'moon'}
+    assert_cacheable_get :show_relationship, params: {crater_id: 'S56D', relationship: 'moon'}
 
     assert_response :success
     assert_equal "moons", json_response['data']['type']
@@ -3418,7 +3411,7 @@ end
 
 class Api::V7::ClientsControllerTest < ActionController::TestCase
   def test_get_namespaced_model_not_matching_resource_using_model_hint
-    get :index
+    assert_cacheable_get :index
     assert_response :success
     assert_equal 'clients', json_response['data'][0]['type']
   ensure
@@ -3427,7 +3420,7 @@ class Api::V7::ClientsControllerTest < ActionController::TestCase
 
   def test_get_namespaced_model_not_matching_resource_not_using_model_hint
     Api::V7::ClientResource._model_hints.delete('api/v7/customer')
-    get :index
+    assert_cacheable_get :index
     assert_response :success
     assert_equal 'customers', json_response['data'][0]['type']
   ensure
@@ -3437,7 +3430,7 @@ end
 
 class Api::V7::CustomersControllerTest < ActionController::TestCase
   def test_get_namespaced_model_matching_resource
-    get :index
+    assert_cacheable_get :index
     assert_response :success
     assert_equal 'customers', json_response['data'][0]['type']
   end
@@ -3446,7 +3439,7 @@ end
 class Api::V7::CategoriesControllerTest < ActionController::TestCase
   def test_uncaught_error_in_controller_translated_to_internal_server_error
 
-    get :show, params: {id: '1'}
+    assert_cacheable_get :show, params: {id: '1'}
     assert_response 500
     assert_match /Internal Server Error/, json_response['errors'][0]['detail']
   end
@@ -3454,7 +3447,7 @@ class Api::V7::CategoriesControllerTest < ActionController::TestCase
   def test_not_whitelisted_error_in_controller
     original_config = JSONAPI.configuration.dup
     JSONAPI.configuration.exception_class_whitelist = []
-    get :show, params: {id: '1'}
+    assert_cacheable_get :show, params: {id: '1'}
     assert_response 500
     assert_match /Internal Server Error/, json_response['errors'][0]['detail']
   ensure
@@ -3466,7 +3459,7 @@ class Api::V7::CategoriesControllerTest < ActionController::TestCase
     $PostProcessorRaisesErrors = true
     JSONAPI.configuration.exception_class_whitelist = [PostsController::SubSpecialError]
     assert_raises PostsController::SubSpecialError do
-      get :show, params: {id: '1'}
+      assert_cacheable_get :show, params: {id: '1'}
     end
   ensure
     JSONAPI.configuration = original_config

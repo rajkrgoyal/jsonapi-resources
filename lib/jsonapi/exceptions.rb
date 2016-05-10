@@ -1,6 +1,40 @@
 module JSONAPI
   module Exceptions
-    class Error < RuntimeError; end
+    class Error < RuntimeError
+      def errors
+        raise NotImplementedError, "Subclass of Error must implement errors method"
+      end
+    end
+
+    class AggregatedError < Error
+      attr_accessor :errors
+
+      def initialize(errors)
+        @errors = errors
+      end
+
+      def self.rescuing_map(enumerable)
+        results = []
+        exceptions = []
+
+        enumerable.each do |item|
+          begin
+            results << yield(item)
+          rescue JSONAPI::Exceptions::Error => e
+            exceptions << e
+          end
+        end
+
+        return results if exceptions.empty?
+        raise exceptions.first if exceptions.size == 1
+        raise AggregatedError.new(exceptions.map(&:errors).flatten(1))
+      end
+
+      def self.rescuing_each(enumerable, &block)
+        rescuing_map(enumerable, &block)
+        return nil # Throw away the map result
+      end
+    end
 
     class InternalServerError < Error
       attr_accessor :exception

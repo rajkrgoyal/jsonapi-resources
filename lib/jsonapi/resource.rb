@@ -32,6 +32,10 @@ module JSONAPI
       _model.public_send(self.class._primary_key)
     end
 
+    def cache_id
+      [id, _model.public_send(self.class._cache_field)]
+    end
+
     def is_new?
       id.nil?
     end
@@ -159,6 +163,11 @@ module JSONAPI
     # the _options hash will contain the serializer and the serialization_options
     def custom_links(_options)
       {}
+    end
+
+    def preloaded_fragments
+      # A hash of hashes
+      @preloaded_fragments ||= Hash.new
     end
 
     private
@@ -320,6 +329,7 @@ module JSONAPI
       def inherited(subclass)
         subclass.abstract(false)
         subclass.immutable(false)
+        subclass.caching(false)
         subclass._attributes = (_attributes || {}).dup
         subclass._model_hints = (_model_hints || {}).dup
 
@@ -371,7 +381,8 @@ module JSONAPI
         end
       end
 
-      attr_accessor :_attributes, :_relationships, :_allowed_filters, :_type, :_paginator, :_model_hints
+      attr_accessor :_attributes, :_relationships, :_type, :_model_hints
+      attr_writer :_allowed_filters, :_paginator
 
       def create(context)
         new(create_model, context)
@@ -437,7 +448,7 @@ module JSONAPI
       def has_one(*attrs)
         _add_relationship(Relationship::ToOne, *attrs)
       end
-      
+
       def belongs_to(*attrs)
         ActiveSupport::Deprecation.warn "In #{name} you exposed a `has_one` relationship "\
                                         " using the `belongs_to` class method. We think `has_one`" \
@@ -476,13 +487,17 @@ module JSONAPI
         @_primary_key = key.to_sym
       end
 
+      def cache_field(field)
+        @_cache_field = field.to_sym
+      end
+
       # TODO: remove this after the createable_fields and updateable_fields are phased out
       # :nocov:
       def method_missing(method, *args)
-        if method.to_s.match /createable_fields/
+        if method.to_s.match(/createable_fields/)
           ActiveSupport::Deprecation.warn('`createable_fields` is deprecated, please use `creatable_fields` instead')
           creatable_fields(*args)
-        elsif method.to_s.match /updateable_fields/
+        elsif method.to_s.match(/updateable_fields/)
           ActiveSupport::Deprecation.warn('`updateable_fields` is deprecated, please use `updatable_fields` instead')
           updatable_fields(*args)
         else
@@ -646,43 +661,51 @@ module JSONAPI
         count_records(filter_records(filters, options))
       end
 
-      # Override this method if you have more complex requirements than this basic find method provides
       def find(filters, options = {})
-        context = options[:context]
-
-        records = filter_records(filters, options)
-
-        sort_criteria = options.fetch(:sort_criteria) { [] }
-        order_options = construct_order_options(sort_criteria)
-        records = sort_records(records, order_options, context)
-
-        records = apply_pagination(records, options[:paginator], order_options)
-
-        resources_for(records, context)
+        resources_for(find_records(filters, options), options[:context])
       end
 
       def resources_for(records, context)
-        resources = []
         resource_classes = {}
-        records.each do |model|
+        records.map do |model|
           resource_class = resource_classes[model.class] ||= self.resource_for_model(model)
-          resources.push resource_class.new(model, context)
+          resource_class.new(model, context)
         end
+      end
 
-        resources
+      def find_serialized_with_caching(filters_or_source, serializer, options = {})
+        if filters_or_source.is_a?(ActiveRecord::Relation)
+          records = filters_or_source
+        elsif _model_class.respond_to?(:all) && _model_class.respond_to?(:arel_table)
+          records = find_records(filters_or_source, options.except(:include_directives))
+        else
+          records = find(filters_or_source, options)
+        end
+        cached_resources_for(records, serializer, options)
       end
 
       def find_by_key(key, options = {})
         context = options[:context]
-        records = records(options)
-        records = apply_includes(records, options)
-        model = records.where({_primary_key => key}).first
+        records = find_records({_primary_key => key}, options.except(:paginator, :sort_criteria))
+        model = records.first
         fail JSONAPI::Exceptions::RecordNotFound.new(key) if model.nil?
         self.resource_for_model(model).new(model, context)
       end
 
+      def find_by_key_serialized_with_caching(key, serializer, options = {})
+        if _model_class.respond_to?(:all) && _model_class.respond_to?(:arel_table)
+          results = find_serialized_with_caching({_primary_key => key}, serializer, options)
+          result = results.first
+          fail JSONAPI::Exceptions::RecordNotFound.new(key) if result.nil?
+          return result
+        else
+          resource = find_by_key(key, options)
+          return cached_resources_for([resource], serializer, options).first
+        end
+      end
+
       # Override this method if you want to customize the relation for
-      # finder methods (find, find_by_key)
+      # finder methods (find, find_by_key, find_serialized_with_caching)
       def records(_options = {})
         _model_class.all
       end
@@ -793,11 +816,22 @@ module JSONAPI
       end
 
       def _model_name
-        _abstract ? '' : @_model_name ||= name.demodulize.sub(/Resource$/, '')
+        if _abstract
+          return ''
+        else
+          return @_model_name if defined?(@_model_name)
+          class_name = self.name
+          return '' if class_name.nil?
+          return @_model_name = class_name.demodulize.sub(/Resource$/, '')
+        end
       end
 
       def _primary_key
         @_primary_key ||= _model_class.respond_to?(:primary_key) ? _model_class.primary_key : :id
+      end
+
+      def _cache_field
+        @_cache_field ||= JSONAPI.configuration.default_resource_cache_field
       end
 
       def _table_name
@@ -809,7 +843,7 @@ module JSONAPI
       end
 
       def _allowed_filters
-        !@_allowed_filters.nil? ? @_allowed_filters : { id: {} }
+        defined?(@_allowed_filters) ? @_allowed_filters : { id: {} }
       end
 
       def _paginator
@@ -840,10 +874,27 @@ module JSONAPI
         !@immutable
       end
 
+      def caching(val = true)
+        @caching = val
+      end
+
+      def _caching
+        @caching
+      end
+
+      def caching?
+        @caching && !JSONAPI.configuration.resource_cache.nil?
+      end
+
+      def attribute_caching_context(context)
+        nil
+      end
+
       def _model_class
         return nil if _abstract
 
-        return @model if @model
+        return @model if defined?(@model)
+        return nil if self.name.to_s.blank? && _model_name.to_s.blank?
         @model = _model_name.to_s.safe_constantize
         warn "[MODEL NOT FOUND] Model could not be found for #{self.name}. If this a base Resource declare it as abstract." if @model.nil?
         @model
@@ -900,10 +951,29 @@ module JSONAPI
             @model.method("#{foreign_key}=").call(value)
           end unless method_defined?("#{foreign_key}=")
 
-          define_method associated_records_method_name do
+          define_method associated_records_method_name do |opts = {}|
             relationship = self.class._relationships[relationship_name]
             relation_name = relationship.relation_name(context: @context)
-            records_for(relation_name)
+            resource_klass = relationship.resource_klass
+            records = records_for(relation_name)
+
+            filters = opts.fetch(:filters, {})
+            unless filters.nil? || filters.empty?
+              records = resource_klass.apply_filters(records, filters, opts)
+            end
+
+            sort_criteria =  opts.fetch(:sort_criteria, {})
+            unless sort_criteria.nil? || sort_criteria.empty?
+              order_options = relationship.resource_klass.construct_order_options(sort_criteria)
+              records = resource_klass.apply_sort(records, order_options, @context)
+            end
+
+            paginator = opts[:paginator]
+            if paginator
+              records = resource_klass.apply_pagination(records, paginator, order_options)
+            end
+
+            records
           end unless method_defined?(associated_records_method_name)
 
           if relationship.is_a?(JSONAPI::Relationship::ToOne)
@@ -912,7 +982,7 @@ module JSONAPI
                 @model.method(foreign_key).call
               end unless method_defined?(foreign_key)
 
-              define_method relationship_name do |options = {}|
+              define_method relationship_name do |opts = {}|
                 relationship = self.class._relationships[relationship_name]
 
                 if relationship.polymorphic?
@@ -936,7 +1006,7 @@ module JSONAPI
                 record.public_send(relationship.resource_klass._primary_key)
               end unless method_defined?(foreign_key)
 
-              define_method relationship_name do |options = {}|
+              define_method relationship_name do |opts = {}|
                 relationship = self.class._relationships[relationship_name]
 
                 resource_klass = relationship.resource_klass
@@ -954,27 +1024,11 @@ module JSONAPI
               end
             end unless method_defined?(foreign_key)
 
-            define_method relationship_name do |options = {}|
+            define_method relationship_name do |opts = {}|
               relationship = self.class._relationships[relationship_name]
 
               resource_klass = relationship.resource_klass
-              records = public_send(associated_records_method_name)
-
-              filters = options.fetch(:filters, {})
-              unless filters.nil? || filters.empty?
-                records = resource_klass.apply_filters(records, filters, options)
-              end
-
-              sort_criteria =  options.fetch(:sort_criteria, {})
-              unless sort_criteria.nil? || sort_criteria.empty?
-                order_options = relationship.resource_klass.construct_order_options(sort_criteria)
-                records = resource_klass.apply_sort(records, order_options, @context)
-              end
-
-              paginator = options[:paginator]
-              if paginator
-                records = resource_klass.apply_pagination(records, paginator, order_options)
-              end
+              records = public_send(associated_records_method_name, opts)
 
               return records.collect do |record|
                 if relationship.polymorphic?
@@ -988,6 +1042,36 @@ module JSONAPI
       end
 
       private
+
+      def find_records(filters, options = {})
+        context = options[:context]
+
+        records = filter_records(filters, options)
+
+        sort_criteria = options.fetch(:sort_criteria) { [] }
+        order_options = construct_order_options(sort_criteria)
+        records = sort_records(records, order_options, context)
+
+        records = apply_pagination(records, options[:paginator], order_options)
+
+        records
+      end
+
+      def cached_resources_for(records, serializer, options)
+        if records.is_a?(Array) && records.all?{|rec| rec.is_a?(JSONAPI::Resource)}
+          resources = records.map{|r| [r.id, r] }.to_h
+        elsif self.caching?
+          t = _model_class.arel_table
+          cache_ids = pluck_arel_attributes(records, t[_primary_key], t[_cache_field])
+          resources = CachedResourceFragment.fetch_fragments(self, serializer, options[:context], cache_ids)
+        else
+          resources = resources_for(records, options).map{|r| [r.id, r] }.to_h
+        end
+
+        preload_included_fragments(resources, records, serializer, options)
+
+        resources.values
+      end
 
       def check_reserved_resource_name(type, name)
         if [:ids, :types, :hrefs, :links].include?(type)
@@ -1008,6 +1092,124 @@ module JSONAPI
         if [:id, :ids, :type, :types].include?(name.to_sym)
           warn "[NAME COLLISION] `#{name}` is a reserved relationship name in #{_resource_name_from_type(_type)}."
         end
+      end
+
+      def preload_included_fragments(resources, records, serializer, options)
+        return if resources.empty?
+        res_ids = resources.keys
+
+        include_directives = options[:include_directives]
+        return unless include_directives
+
+        relevant_options = options.except(:include_directives, :order, :paginator)
+        context = options[:context]
+
+        # For each association, including indirect associations, find the target record ids.
+        # Even if a target class doesn't have caching enabled, we still have to look up
+        # and match the target ids here, because we can't use ActiveRecord#includes.
+        #
+        # Note that `paths` returns partial paths before complete paths, so e.g. the partial
+        # fragments for posts.comments will exist before we start working with posts.comments.author
+        target_resources = {}
+        include_directives.paths.each do |path|
+          # If path is [:posts, :comments, :author], then...
+          pluck_attrs = [] # [posts.id, comments.id, authors.id, authors.updated_at]
+          pluck_attrs << self._model_class.arel_table[self._primary_key]
+
+          relation = records
+            .except(:limit, :offset, :order)
+            .where({_primary_key => res_ids})
+
+          # These are updated as we iterate through the association path; afterwards they will
+          # refer to the final resource on the path, i.e. the actual resource to find in the cache.
+          # So e.g. if path is [:posts, :comments, :author], then after iteration...
+          parent_klass = nil # Comment
+          klass = self # Person
+          relationship = nil # JSONAPI::Relationship::ToOne for CommentResource.author
+          table = nil # people
+          assocs_path = [] # [ :posts, :approved_comments, :author ]
+          ar_hash = nil # { :posts => { :approved_comments => :author } }
+
+          # For each step on the path, figure out what the actual table name/alias in the join
+          # will be, and include the primary key of that table in our list of fields to select
+          path.each do |elem|
+            relationship = klass._relationships[elem]
+            assocs_path << relationship.relation_name(options).to_sym
+            # Converts [:a, :b, :c] to Rails-style { :a => { :b => :c }}
+            ar_hash = assocs_path.reverse.reduce{|memo, step| { step => memo } }
+            # We can't just look up the table name from the resource class, because Arel could
+            # have used a table alias if the relation includes a self-reference.
+            table = relation.joins(ar_hash).arel.source.right.last.left
+            parent_klass = klass
+            klass = relationship.resource_klass
+            pluck_attrs << table[klass._primary_key]
+          end
+
+          # Pre-fill empty hashes for each resource up to the end of the path.
+          # This allows us to later distinguish between a preload that returned nothing
+          # vs. a preload that never ran.
+          prefilling_resources = resources.values
+          path.each do |rel_name|
+            rel_name = serializer.key_formatter.format(rel_name)
+            prefilling_resources.map! do |res|
+              res.preloaded_fragments[rel_name] ||= {}
+              res.preloaded_fragments[rel_name].values
+            end
+            prefilling_resources.flatten!(1)
+          end
+
+          pluck_attrs << table[klass._cache_field] if klass.caching?
+          relation = relation.joins(ar_hash)
+          if relationship.is_a?(JSONAPI::Relationship::ToMany)
+            # Rails doesn't include order clauses in `joins`, so we have to add that manually here.
+            # FIXME Should find a better way to reflect on relationship ordering. :-(
+            relation = relation.order(parent_klass._model_class.new.send(assocs_path.last).arel.orders)
+          end
+          id_rows = pluck_arel_attributes(relation.joins(ar_hash), *pluck_attrs)
+
+          target_resources[klass.name] ||= {}
+
+          if klass.caching?
+            sub_cache_ids = id_rows
+              .map{|row| row.last(2) }
+              .reject{|row| target_resources[klass.name].has_key?(row.first) }
+              .uniq
+            target_resources[klass.name].merge! CachedResourceFragment.fetch_fragments(
+              klass, serializer, context, sub_cache_ids
+            )
+          else
+            sub_res_ids = id_rows
+              .map(&:last)
+              .reject{|id| target_resources[klass.name].has_key?(id) }
+              .uniq
+            found = klass.find({klass._primary_key => sub_res_ids}, relevant_options)
+            target_resources[klass.name].merge! found.map{|r| [r.id, r] }.to_h
+          end
+
+          id_rows.each do |row|
+            res = resources[row.first]
+            path.each_with_index do |rel_name, index|
+              rel_name = serializer.key_formatter.format(rel_name)
+              rel_id = row[index+1]
+              assoc_rels = res.preloaded_fragments[rel_name]
+              if index == path.length - 1
+                assoc_rels[rel_id] = target_resources[klass.name].fetch(rel_id)
+              else
+                res = assoc_rels[rel_id]
+              end
+            end
+          end
+        end
+      end
+
+      def pluck_arel_attributes(relation, *attrs)
+        conn = relation.connection
+        quoted_attrs = attrs.map do |attr|
+          quoted_table = conn.quote_table_name(attr.relation.table_alias || attr.relation.name)
+          quoted_column = conn.quote_column_name(attr.name)
+          "#{quoted_table}.#{quoted_column}"
+        end
+        relation.pluck(*quoted_attrs)
       end
     end
   end

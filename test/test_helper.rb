@@ -27,6 +27,7 @@ require 'pry'
 require File.expand_path('../helpers/value_matchers', __FILE__)
 require File.expand_path('../helpers/assertions', __FILE__)
 require File.expand_path('../helpers/functional_helpers', __FILE__)
+require File.expand_path('../helpers/configuration_helpers', __FILE__)
 
 Rails.env = 'test'
 
@@ -52,9 +53,6 @@ class TestApp < Rails::Application
   config.active_record.schema_format = :none
   config.active_support.test_order = :random
 
-  # Turn off millisecond precision to maintain Rails 4.0 and 4.1 compatibility in test results
-  ActiveSupport::JSON::Encoding.time_precision = 0 if Rails::VERSION::MAJOR >= 4 && Rails::VERSION::MINOR >= 1
-
   if Rails::VERSION::MAJOR >= 5
     config.active_support.halt_callback_chains_on_return_false = false
     config.active_record.time_zone_aware_types = [:time, :datetime]
@@ -64,21 +62,6 @@ end
 module MyEngine
   class Engine < ::Rails::Engine
     isolate_namespace MyEngine
-  end
-end
-
-# Patch RAILS 4.0 to not use millisecond precision
-if Rails::VERSION::MAJOR >= 4 && Rails::VERSION::MINOR < 1
-  module ActiveSupport
-    class TimeWithZone
-      def as_json(options = nil)
-        if ActiveSupport::JSON::Encoding.use_standard_json_time_format
-          xmlschema
-        else
-          %(#{time.strftime("%Y/%m/%d %H:%M:%S")} #{formatted_offset(false)})
-        end
-      end
-    end
   end
 end
 
@@ -104,7 +87,7 @@ if Rails::VERSION::MAJOR < 5
       if args[2] && args[2][:params]
         args[2] = args[2][:params]
       end
-      super *args
+      super
     end
   end
   class ActionController::TestCase
@@ -197,24 +180,14 @@ if Rails::VERSION::MAJOR >= 5
   end
 end
 
-def count_queries(&block)
-  @query_count = 0
+def assert_query_count(expected, msg = nil, &block)
   @queries = []
-  ActiveSupport::Notifications.subscribe('sql.active_record') do |name, started, finished, unique_id, payload|
-    @query_count = @query_count + 1
-    @queries.push payload[:sql]
-  end
-  yield block
-  ActiveSupport::Notifications.unsubscribe('sql.active_record')
-  @query_count
-end
+  callback = lambda {|_, _, _, _, payload| @queries.push payload[:sql] }
+  ActiveSupport::Notifications.subscribed(callback, 'sql.active_record', &block)
 
-def assert_query_count(expected, msg = nil)
-  msg = message(msg) {
-    "Expected #{expected} queries, ran #{@query_count} queries"
-  }
-  show_queries unless expected == @query_count
-  assert expected == @query_count, msg
+  show_queries unless expected == @queries.size
+  assert expected == @queries.size, "Expected #{expected} queries, ran #{@queries.size} queries"
+  @queries = nil
 end
 
 def show_queries
@@ -416,6 +389,7 @@ class Minitest::Test
   include Helpers::Assertions
   include Helpers::ValueMatchers
   include Helpers::FunctionalHelpers
+  include Helpers::ConfigurationHelpers
   include ActiveRecord::TestFixtures
 
   def run_in_transaction?
@@ -438,9 +412,145 @@ class ActionDispatch::IntegrationTest
   self.fixture_path = "#{Rails.root}/fixtures"
   fixtures :all
 
-  def assert_jsonapi_response(expected_status)
+  def assert_jsonapi_response(expected_status, msg = nil)
     assert_equal JSONAPI::MEDIA_TYPE, response.content_type
-    assert_equal expected_status, status
+    if status != expected_status && status >= 400
+      pp json_response rescue nil
+    end
+    assert_equal expected_status, status, msg
+  end
+
+  def assert_jsonapi_get(url, msg = "GET response must be 200")
+    get url, headers: { 'Accept' => JSONAPI::MEDIA_TYPE }
+    assert_jsonapi_response 200, msg
+  end
+
+  # Perform a GET request, make sure it returns 200, then try it again with caching enabled
+  # to make sure that doesn't affect the output.
+  def assert_cacheable_jsonapi_get(url, cached_classes = :all)
+    assert_nil JSONAPI.configuration.resource_cache
+
+    assert_jsonapi_get url
+    non_caching_response = json_response.dup
+
+    cache = ActiveSupport::Cache::MemoryStore.new
+
+    warmup = with_resource_caching(cache, cached_classes) do
+      assert_jsonapi_get url, "Cache warmup GET response must be 200"
+    end
+
+    assert_equal(
+      non_caching_response.pretty_inspect,
+      json_response.pretty_inspect,
+      "Cache warmup response must match normal response"
+    )
+
+    cached = with_resource_caching(cache, cached_classes) do
+      assert_jsonapi_get url, "Cached GET response must be 200"
+    end
+
+    assert_equal(
+      non_caching_response.pretty_inspect,
+      json_response.pretty_inspect,
+      "Cached response must match normal response"
+    )
+    assert_equal 0, cached[:total][:misses], "Cached response must not cause any cache misses"
+    assert_equal warmup[:total][:misses], cached[:total][:hits], "Cached response must use cache"
+  end
+end
+
+class ActionController::TestCase
+  def assert_cacheable_get(action, *args)
+    assert_nil JSONAPI.configuration.resource_cache
+
+    normal_queries = []
+    normal_query_callback = lambda {|_, _, _, _, payload| normal_queries.push payload[:sql] }
+    ActiveSupport::Notifications.subscribed(normal_query_callback, 'sql.active_record') do
+      get action, *args
+    end
+    non_caching_response = json_response_sans_backtraces
+    non_caching_status = response.status
+
+    # Don't let all the cache-testing requests mess with assert_query_count
+    orig_queries = @queries.try(:dup)
+    orig_request_headers = @request.headers.dup
+
+    modes = {none: [], all: :all}
+    if @controller.class.included_modules.include?(JSONAPI::ActsAsResourceController)
+      resource_klass = @controller.send(:resource_klass)
+      if resource_klass._model_class.respond_to?(:arel_table)
+        modes[:root_only] = [resource_klass]
+        modes[:all_but_root] = {except: [resource_klass]}
+      end
+    end
+
+    modes.each do |mode, cached_resources|
+      cache = ActiveSupport::Cache::MemoryStore.new
+      cache_activity = {}
+
+      [:warmup, :lookup].each do |phase|
+        begin
+          cache_queries = []
+          cache_query_callback = lambda {|_, _, _, _, payload| cache_queries.push payload[:sql] }
+          cache_activity[phase] = with_resource_caching(cache, cached_resources) do
+            ActiveSupport::Notifications.subscribed(cache_query_callback, 'sql.active_record') do
+              @controller = nil
+              setup_controller_request_and_response
+              @request.headers.merge!(orig_request_headers.dup)
+              get action, *args
+            end
+          end
+        rescue Exception
+          puts "Exception raised during cache (mode: #{mode}) #{phase}"
+          raise
+        end
+
+        if response.status != non_caching_status && !response.body.to_s.strip.empty?
+          pp json_response rescue nil
+        end
+        assert_equal(
+          non_caching_status,
+          response.status,
+          "Cache (mode: #{mode}) #{phase} response status must match normal response"
+        )
+        assert_equal(
+          non_caching_response.pretty_inspect,
+          json_response_sans_backtraces.pretty_inspect,
+          "Cache (mode: #{mode}) #{phase} response body must match normal response"
+        )
+        assert_operator(
+          cache_queries.size,
+          :<=,
+          normal_queries.size*2, # Allow up to double the number of queries as the uncached action
+          "Cache (mode: #{mode}) #{phase} action made too many queries:\n#{cache_queries.pretty_inspect}"
+        )
+      end
+
+      if mode == :all
+        assert_equal 0, cache_activity[:lookup][:total][:misses],
+                     "Cache (mode: #{mode}) lookup response must not cause any cache misses"
+        assert_operator(
+          cache_activity[:lookup][:total][:hits],
+          :>=,
+          cache_activity[:warmup][:total][:misses],
+         "Cache (mode: #{mode}) lookup response must use cache entries created by warmup"
+        )
+      end
+    end
+
+    @queries = orig_queries
+  end
+
+  private
+
+  def json_response_sans_backtraces
+    return nil if response.body.to_s.strip.empty?
+
+    r = json_response.dup
+    (r["errors"] || []).each do |err|
+      err["meta"].delete("backtrace") if err.has_key?("meta")
+    end
+    return r
   end
 end
 
@@ -450,11 +560,12 @@ class IntegrationBenchmark < ActionDispatch::IntegrationTest
   end
 
   def self.run_one_method(klass, method_name, reporter)
-    Benchmark.bm(method_name.length) do |job|
+    Benchmark.bmbm(method_name.length) do |job|
       job.report(method_name) do
         super(klass, method_name, reporter)
       end
     end
+    puts
   end
 end
 

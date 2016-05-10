@@ -29,3 +29,9 @@ e:
   email: lib@xyz.fake
   date_joined: <%= DateTime.parse('2013-11-30 4:20:00 UTC +00:00') %>
   book_admin: true
+
+x:
+  id: 0
+  name: The Shadow
+  email: nobody@nowhere.comment_num
+  date_joined: <%= DateTime.parse('1970-01-01 20:25:00 UTC +00:00') %>

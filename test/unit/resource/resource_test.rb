@@ -181,7 +181,7 @@ class ResourceTest < ActiveSupport::TestCase
   end
 
   def test_nil_abstract_model_class
-    assert_output nil, '' do
+    assert_silent do
       assert_nil NoMatchAbstractResource._model_class
     end
   end

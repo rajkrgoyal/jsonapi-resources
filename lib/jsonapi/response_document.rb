@@ -1,7 +1,8 @@
 module JSONAPI
   class ResponseDocument
-    def initialize(operation_results, options = {})
+    def initialize(operation_results, serializer, options = {})
       @operation_results = operation_results
+      @serializer = serializer
       @options = options
 
       @key_formatter = @options.fetch(:key_formatter, JSONAPI.configuration.key_formatter)
@@ -29,18 +30,6 @@ module JSONAPI
 
     private
 
-    def serializer
-      @serializer ||= @options.fetch(:resource_serializer_klass, JSONAPI::ResourceSerializer).new(
-        @options.fetch(:primary_resource_klass),
-        include_directives: @options[:include_directives],
-        fields: @options[:fields],
-        base_url: @options.fetch(:base_url, ''),
-        key_formatter: @key_formatter,
-        route_formatter: @options.fetch(:route_formatter, JSONAPI.configuration.route_formatter),
-        serialization_options: @options.fetch(:serialization_options, {})
-      )
-    end
-
     # Rolls up the top level meta data from the base_meta, the set of operations,
     # and the result of each operation. The keys are then formatted.
     def top_level_meta
@@ -60,7 +49,7 @@ module JSONAPI
         end
       end
 
-      meta.deep_transform_keys { |key| @key_formatter.format(key) }
+      meta.as_json.deep_transform_keys { |key| @key_formatter.format(key) }
     end
 
     # Rolls up the top level links from the base_links, the set of operations,
@@ -78,9 +67,9 @@ module JSONAPI
             result.pagination_params.each_pair do |link_name, params|
               if result.is_a?(JSONAPI::RelatedResourcesOperationResult)
                 relationship = result.source_resource.class._relationships[result._type.to_sym]
-                links[link_name] = serializer.link_builder.relationships_related_link(result.source_resource, relationship, query_params(params))
+                links[link_name] = @serializer.link_builder.relationships_related_link(result.source_resource, relationship, query_params(params))
               else
-                links[link_name] = serializer.query_link(query_params(params))
+                links[link_name] = @serializer.query_link(query_params(params))
               end
             end
         end
@@ -117,11 +106,11 @@ module JSONAPI
 
           case result
           when JSONAPI::ResourceOperationResult
-            serializer.serialize_to_hash(result.resource)
+            @serializer.serialize_to_hash(result.resource)
           when JSONAPI::ResourcesOperationResult
-            serializer.serialize_to_hash(result.resources)
+            @serializer.serialize_to_hash(result.resources)
           when JSONAPI::LinksObjectOperationResult
-            serializer.serialize_to_links_hash(result.parent_resource,
+            @serializer.serialize_to_links_hash(result.parent_resource,
                                                result.relationship)
           when JSONAPI::OperationResult
             {}
@@ -138,7 +127,7 @@ module JSONAPI
             end
           end
 
-          serializer.serialize_to_hash(resources)
+          @serializer.serialize_to_hash(resources)
         end
       end
     end

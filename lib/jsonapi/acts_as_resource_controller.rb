@@ -62,20 +62,26 @@ module JSONAPI
       @request = JSONAPI::RequestParser.new(params, context: context,
                                             key_formatter: key_formatter,
                                             server_error_callbacks: (self.class.server_error_callbacks || []))
-      unless @request.errors.empty?
-        render_errors(@request.errors)
-      else
-        process_operations
-        render_results(@operation_results)
+
+      unless JSONAPI.configuration.resource_cache.nil?
+        @request.cache_serializer = resource_serializer
       end
 
+      begin
+        operations = @request.operations
+      rescue JSONAPI::Exceptions::Error => e
+        render_errors(e.errors)
+      else
+        results = process_operations(operations)
+        render_results(results)
+      end
     rescue => e
       handle_exceptions(e)
     end
 
-    def process_operations
+    def process_operations(operations)
       run_callbacks :process_operations do
-        @operation_results = operation_dispatcher.process(@request.operations)
+        operation_dispatcher.process(operations)
       end
     end
 
@@ -107,6 +113,19 @@ module JSONAPI
 
     def resource_serializer_klass
       @resource_serializer_klass ||= JSONAPI::ResourceSerializer
+    end
+
+    def resource_serializer
+      @resource_serializer ||= resource_serializer_klass.new(
+        resource_klass,
+        include_directives: @request ? @request.include_directives : nil,
+        fields: @request ? @request.fields : {},
+        base_url: base_url,
+        key_formatter: key_formatter,
+        route_formatter: route_formatter,
+        serialization_options: serialization_options
+      )
+      @resource_serializer
     end
 
     def base_url
@@ -204,16 +223,24 @@ module JSONAPI
 
     def render_results(operation_results)
       response_doc = create_response_document(operation_results)
+      content = response_doc.contents
 
-      render_options = {
-        status: response_doc.status,
-        json:   response_doc.contents,
-        content_type: JSONAPI::MEDIA_TYPE
-      }
+      render_options = {}
+      if operation_results.has_errors?
+        render_options[:json] = content
+      else
+        # Bypasing ActiveSupport allows us to use CompiledJson objects for cached response fragments
+        render_options[:body] = JSON.generate(content)
+      end
 
-      render_options[:location] = response_doc.contents[:data]["links"][:self] if (
-        response_doc.status == :created && response_doc.contents[:data].class != Array
+      render_options[:location] = content[:data]["links"][:self] if (
+        response_doc.status == :created && content[:data].class != Array
       )
+
+      # For whatever reason, `render` ignores :status and :content_type when :body is set.
+      # But, we can just set those values directly in the Response object instead.
+      response.status = response_doc.status
+      response.headers['Content-Type'] = JSONAPI::MEDIA_TYPE
 
       render(render_options)
     end
@@ -221,17 +248,11 @@ module JSONAPI
     def create_response_document(operation_results)
       JSONAPI::ResponseDocument.new(
         operation_results,
-        primary_resource_klass: resource_klass,
-        include_directives: @request ? @request.include_directives : nil,
-        fields: @request ? @request.fields : nil,
-        base_url: base_url,
+        operation_results.has_errors? ? nil : resource_serializer,
         key_formatter: key_formatter,
-        route_formatter: route_formatter,
         base_meta: base_meta,
         base_links: base_response_links,
-        resource_serializer_klass: resource_serializer_klass,
-        request: @request,
-        serialization_options: serialization_options
+        request: @request
       )
     end
 

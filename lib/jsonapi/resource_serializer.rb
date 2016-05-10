@@ -1,7 +1,9 @@
 module JSONAPI
   class ResourceSerializer
 
-    attr_reader :link_builder, :key_formatter, :serialization_options, :primary_class_name
+    attr_reader :link_builder, :key_formatter, :serialization_options, :primary_class_name,
+                :fields, :include_directives, :always_include_to_one_linkage_data,
+                :always_include_to_many_linkage_data
 
     # initialize
     # Options can include
@@ -18,8 +20,8 @@ module JSONAPI
     def initialize(primary_resource_klass, options = {})
       @primary_class_name = primary_resource_klass._type
       @fields             = options.fetch(:fields, {})
-      @include            = options.fetch(:include, [])
       @include_directives = options[:include_directives]
+      @include_directives ||= JSONAPI::IncludeDirectives.new(options.fetch(:include, []))
       @key_formatter      = options.fetch(:key_formatter, JSONAPI.configuration.key_formatter)
       @id_formatter       = ValueFormatter.value_formatter_for(:id)
       @link_builder       = generate_link_builder(primary_resource_klass, options)
@@ -32,16 +34,19 @@ module JSONAPI
       # Warning: This makes ResourceSerializer non-thread-safe. That's not a problem with the
       # request-specific way it's currently used, though.
       @value_formatter_type_cache = NaiveCache.new{|arg| ValueFormatter.value_formatter_for(arg) }
+
+      @_config_keys = {}
+      @_supplying_attribute_fields = {}
+      @_supplying_relationship_fields = {}
     end
 
     # Converts a single resource, or an array of resources to a hash, conforming to the JSONAPI structure
     def serialize_to_hash(source)
-      @top_level_sources = Set.new([source].flatten.compact.map {|s| top_level_source_key(s) })
+      @top_level_sources = Set.new([source].flatten(1).compact.map {|s| top_level_source_key(s) })
 
       is_resource_collection = source.respond_to?(:to_ary)
 
       @included_objects = {}
-      @include_directives ||= JSONAPI::IncludeDirectives.new(@include)
 
       process_primary(source, @include_directives.include_directives)
 
@@ -91,6 +96,70 @@ module JSONAPI
       @value_formatter_type_cache.get(format).format(value)
     end
 
+    def config_key(resource_klass)
+      @_config_keys.fetch resource_klass do
+        desc = self.config_description(resource_klass).map(&:inspect).join(",")
+        key = JSONAPI.configuration.resource_cache_digest_function.call(desc)
+        @_config_keys[resource_klass] = "SRLZ-#{key}"
+      end
+    end
+
+    def config_description(resource_klass)
+      {
+        class_name: self.class.name,
+        seriserialization_options: serialization_options.sort.map(&:as_json),
+        supplying_attribute_fields: supplying_attribute_fields(resource_klass).sort,
+        supplying_relationship_fields: supplying_relationship_fields(resource_klass).sort,
+        link_builder_base_url: link_builder.base_url,
+        route_formatter_class: link_builder.route_formatter.uncached.class.name,
+        key_formatter_class: key_formatter.uncached.class.name,
+        always_include_to_one_linkage_data: always_include_to_one_linkage_data,
+        always_include_to_many_linkage_data: always_include_to_many_linkage_data
+      }
+    end
+
+    # Returns a serialized hash for the source model
+    def object_hash(source, include_directives = {})
+      obj_hash = {}
+
+      if source.is_a?(JSONAPI::CachedResourceFragment)
+        obj_hash['id'] = source.id
+        obj_hash['type'] = source.type
+
+        obj_hash['links'] = source.links_json if source.links_json
+        obj_hash['attributes'] = source.attributes_json if source.attributes_json
+
+        relationships = cached_relationships_hash(source, include_directives)
+        obj_hash['relationships'] = relationships unless relationships.empty?
+
+        obj_hash['meta'] = source.meta_json if source.meta_json
+      else
+        fetchable_fields = Set.new(source.fetchable_fields)
+
+        # TODO Should this maybe be using @id_formatter instead, for consistency?
+        id_format = source.class._attribute_options(:id)[:format]
+        # protect against ids that were declared as an attribute, but did not have a format set.
+        id_format = 'id' if id_format == :default
+        obj_hash['id'] = format_value(source.id, id_format)
+
+        obj_hash['type'] = format_key(source.class._type.to_s)
+
+        links = links_hash(source)
+        obj_hash['links'] = links unless links.empty?
+
+        attributes = attributes_hash(source, fetchable_fields)
+        obj_hash['attributes'] = attributes unless attributes.empty?
+
+        relationships = relationships_hash(source, fetchable_fields, include_directives)
+        obj_hash['relationships'] = relationships unless relationships.nil? || relationships.empty?
+
+        meta = meta_hash(source)
+        obj_hash['meta'] = meta unless meta.empty?
+      end
+
+      obj_hash
+    end
+
     private
 
     # Process the primary source object(s). This will then serialize associated object recursively based on the
@@ -102,56 +171,45 @@ module JSONAPI
         source.each { |resource| process_primary(resource, include_directives) }
       else
         return {} if source.nil?
-
-        resource = source
-        id = resource.id
-        add_included_object(id, object_hash(source, include_directives), true)
+        add_included_object(object_hash(source, include_directives), true)
       end
     end
 
-    # Returns a serialized hash for the source model
-    def object_hash(source, include_directives)
-      obj_hash = {}
-
-      id_format = source.class._attribute_options(:id)[:format]
-      # protect against ids that were declared as an attribute, but did not have a format set.
-      id_format = 'id' if id_format == :default
-      obj_hash['id'] = format_value(source.id, id_format)
-
-      obj_hash['type'] = format_key(source.class._type.to_s)
-
-      links = links_hash(source)
-      obj_hash['links'] = links unless links.empty?
-
-      attributes = attributes_hash(source)
-      obj_hash['attributes'] = attributes unless attributes.empty?
-
-      relationships = relationships_hash(source, include_directives)
-      obj_hash['relationships'] = relationships unless relationships.nil? || relationships.empty?
-
-      meta = meta_hash(source)
-      obj_hash['meta'] = meta unless meta.empty?
-
-      obj_hash
-    end
-
-    def requested_fields(klass)
-      return if @fields.nil? || @fields.empty?
-      if @fields[klass._type]
-        @fields[klass._type]
-      elsif klass.superclass != JSONAPI::Resource
-        requested_fields(klass.superclass)
+    def supplying_attribute_fields(resource_klass)
+      @_supplying_attribute_fields.fetch resource_klass do
+        attrs = Set.new(resource_klass._attributes.keys)
+        cur = resource_klass
+        while cur != JSONAPI::Resource
+          if @fields.has_key?(cur._type)
+            attrs &= @fields[cur._type]
+            break
+          end
+          cur = cur.superclass
+        end
+        @_supplying_attribute_fields[resource_klass] = attrs
       end
     end
 
-    def attributes_hash(source)
-      requested = requested_fields(source.class)
-      fields = source.fetchable_fields & source.class._attributes.keys.to_a
-      fields = requested & fields unless requested.nil?
+    def supplying_relationship_fields(resource_klass)
+      @_supplying_relationship_fields.fetch resource_klass do
+        relationships = Set.new(resource_klass._relationships.keys)
+        cur = resource_klass
+        while cur != JSONAPI::Resource
+          if @fields.has_key?(cur._type)
+            relationships &= @fields[cur._type]
+            break
+          end
+          cur = cur.superclass
+        end
+        @_supplying_relationship_fields[resource_klass] = relationships
+      end
+    end
 
+    def attributes_hash(source, fetchable_fields)
+      fields = fetchable_fields & supplying_attribute_fields(source.class)
       fields.each_with_object({}) do |name, hash|
-        format = source.class._attribute_options(name)[:format]
         unless name == :id
+          format = source.class._attribute_options(name)[:format]
           hash[format_key(name)] = format_value(source.public_send(name), format)
         end
       end
@@ -181,59 +239,106 @@ module JSONAPI
     end
 
     def top_level_source_key(source)
-      "#{source.class}_#{source.id}"
+      case source
+      when CachedResourceFragment then "#{source.resource_klass}_#{source.id}"
+      when Resource then "#{source.class}_#{@id_formatter.format(source.id)}"
+      else raise "Unknown source type #{source.inspect}"
+      end
     end
 
     def self_referential_and_already_in_source(resource)
       resource && @top_level_sources.include?(top_level_source_key(resource))
     end
 
-    def relationships_hash(source, include_directives)
-      relationships = source.class._relationships
-      requested = requested_fields(source.class)
-      fields = relationships.keys
-      fields = requested & fields unless requested.nil?
+    def relationships_hash(source, fetchable_fields, include_directives = {})
+      if source.is_a?(CachedResourceFragment)
+        return cached_relationships_hash(source, include_directives)
+      end
 
-      field_set = Set.new(fields)
+      include_directives[:include_related] ||= {}
 
-      included_relationships = source.fetchable_fields & relationships.keys
+      relationships = source.class._relationships.select{|k,v| fetchable_fields.include?(k) }
+      field_set = supplying_relationship_fields(source.class) & relationships.keys
 
-      data = {}
+      relationships.each_with_object({}) do |(name, relationship), hash|
+        ia = include_directives[:include_related][name]
+        include_linkage = ia && ia[:include]
+        include_linked_children = ia && !ia[:include_related].empty?
 
-      relationships.each_with_object(data) do |(name, relationship), hash|
-        if included_relationships.include? name
-          ia = include_directives[:include_related][name]
+        if field_set.include?(name)
+          hash[format_key(name)] = link_object(source, relationship, include_linkage)
+        end
 
-          include_linkage = ia && ia[:include]
-          include_linked_children = ia && !ia[:include_related].empty?
-          resources = (include_linkage || include_linked_children) && [source.public_send(name)].flatten.compact
-
-          if field_set.include?(name)
-            hash[format_key(name)] = link_object(source, relationship, include_linkage)
+        # If the object has been serialized once it will be in the related objects list,
+        # but it's possible all children won't have been captured. So we must still go
+        # through the relationships.
+        if include_linkage || include_linked_children
+          resources = if source.preloaded_fragments.has_key?(format_key(name))
+            source.preloaded_fragments[format_key(name)].values
+          else
+            [source.public_send(name)].flatten(1).compact
           end
-
-          # If the object has been serialized once it will be in the related objects list,
-          # but it's possible all children won't have been captured. So we must still go
-          # through the relationships.
-          if include_linkage || include_linked_children
-            resources.each do |resource|
-              next if self_referential_and_already_in_source(resource)
-              id = resource.id
-              type = resource.class.resource_for_model(resource._model)
-              relationships_only = already_serialized?(type, id)
-              if include_linkage && !relationships_only
-                add_included_object(id, object_hash(resource, ia))
-              elsif include_linked_children || relationships_only
-                relationships_hash(resource, ia)
-              end
+          resources.each do |resource|
+            next if self_referential_and_already_in_source(resource)
+            id = resource.id
+            relationships_only = already_serialized?(relationship.type, id)
+            if include_linkage && !relationships_only
+              add_included_object(object_hash(resource, ia))
+            elsif include_linked_children || relationships_only
+              relationships_hash(resource, ia)
             end
           end
         end
       end
     end
 
+    def cached_relationships_hash(source, include_directives)
+      h = source.relationships || {}
+      return h unless include_directives.has_key?(:include_related)
+
+      relationships = source.resource_klass._relationships.select{|k,v| source.fetchable_fields.include?(k) }
+
+      relationships.each do |rel_name, relationship|
+        key = @key_formatter.format(rel_name)
+        to_many = relationship.is_a? JSONAPI::Relationship::ToMany
+
+        ia = include_directives[:include_related][rel_name]
+        if ia
+          if h.has_key?(key)
+            h[key][:data] = to_many ? [] : nil
+          end
+
+          source.preloaded_fragments[key].each do |id, f|
+            unless already_serialized?(relationship.type, id)
+              obj_hash = object_hash(f, ia)
+              unless self_referential_and_already_in_source(f)
+                add_included_object(obj_hash)
+              end
+            end
+
+            if h.has_key?(key)
+              # The hash already has everything we need except the :data field
+              data = {
+                type: format_key(f.is_a?(Resource) ? f.class._type : f.type),
+                id: @id_formatter.format(id)
+              }
+
+              if to_many
+                h[key][:data] << data
+              else
+                h[key][:data] = data
+              end
+            end
+          end
+        end
+      end
+
+      return h
+    end
+
     def already_serialized?(type, id)
       type = format_key(type)
+      id = @id_formatter.format(id)
       @included_objects.key?(type) && @included_objects[type].key?(id)
     end
 
@@ -260,10 +365,30 @@ module JSONAPI
 
     def to_many_linkage(source, relationship)
       linkage = []
-      linkage_types_and_values = foreign_key_types_and_values(source, relationship)
+      linkage_types_and_values = if source.preloaded_fragments.has_key?(format_key(relationship.name))
+        source.preloaded_fragments[format_key(relationship.name)].map do |_, resource|
+          [relationship.type, resource.id]
+        end
+      elsif relationship.polymorphic?
+        assoc = source._model.public_send(relationship.name)
+        # Avoid hitting the database again for values already pre-loaded
+        if assoc.respond_to?(:loaded?) and assoc.loaded?
+          assoc.map do |obj|
+            [obj.type.underscore.pluralize, obj.id]
+          end
+        else
+          assoc.pluck(:type, :id).map do |type, id|
+            [type.underscore.pluralize, id]
+          end
+        end
+      else
+        source.public_send(relationship.foreign_key).map do |value|
+          [relationship.type, value]
+        end
+      end
 
       linkage_types_and_values.each do |type, value|
-        linkage.append({type: format_key(type), id: value})
+        linkage.append({type: format_key(type), id: @id_formatter.format(value)})
       end
       linkage
     end
@@ -298,51 +423,23 @@ module JSONAPI
 
     # Extracts the foreign key value for a to_one relationship.
     def foreign_key_value(source, relationship)
-      related_resource = source.public_send(relationship.name)
+      related_resource = if source.preloaded_fragments.has_key?(format_key(relationship.name))
+        source.preloaded_fragments[format_key(relationship.name)].values.first
+      else
+        source.public_send(relationship.name)
+      end
       return nil unless related_resource
       @id_formatter.format(related_resource.id)
     end
 
-    def foreign_key_types_and_values(source, relationship)
-      if relationship.is_a?(JSONAPI::Relationship::ToMany)
-        if relationship.polymorphic?
-          assoc = source._model.public_send(relationship.name)
-          # Avoid hitting the database again for values already pre-loaded
-          if assoc.respond_to?(:loaded?) and assoc.loaded?
-            assoc.map do |obj|
-              [obj.type.underscore.pluralize, @id_formatter.format(obj.id)]
-            end
-          else
-            assoc.pluck(:type, :id).map do |type, id|
-              [type.underscore.pluralize, @id_formatter.format(id)]
-            end
-          end
-        else
-          source.public_send(relationship.foreign_key).map do |value|
-            [relationship.type, @id_formatter.format(value)]
-          end
-        end
-      end
-    end
-
-    # Sets that an object should be included in the primary document of the response.
-    def set_primary(type, id)
-      type = format_key(type)
-      @included_objects[type][id][:primary] = true
-    end
-
     # Collects the hashes for all objects processed by the serializer
-    def add_included_object(id, object_hash, primary = false)
-      type = object_hash['type']
+    def add_included_object(obj_hash, primary = false)
+      is_cached = obj_hash.is_a?(JSONAPI::CachedResourceFragment)
+      type = is_cached ? obj_hash.type : obj_hash['type']
+      id = is_cached ? obj_hash.id : obj_hash['id']
 
-      @included_objects[type] = {} unless @included_objects.key?(type)
-
-      if already_serialized?(type, id)
-        @included_objects[type][id][:object_hash].merge!(object_hash)
-        set_primary(type, id) if primary
-      else
-        @included_objects[type].store(id, primary: primary, object_hash: object_hash)
-      end
+      @included_objects[type] ||= {}
+      @included_objects[type][id] = { primary: primary, object_hash: obj_hash }
     end
 
     def generate_link_builder(primary_resource_klass, options)

@@ -49,6 +49,7 @@ ActiveRecord::Schema.define do
 
   create_table :tags, force: true do |t|
     t.string :name
+    t.timestamps null: false
   end
 
   create_table :sections, force: true do |t|
@@ -83,6 +84,7 @@ ActiveRecord::Schema.define do
     t.integer :employee_id, null: false
     t.decimal :cost, precision: 12, scale: 4, null: false
     t.date :transaction_date
+    t.timestamps null: false
   end
 
   create_table :planets, force: true do |t|
@@ -104,17 +106,20 @@ ActiveRecord::Schema.define do
     t.string  :name
     t.string  :description
     t.integer :planet_id
+    t.timestamps null: false
   end
 
   create_table :craters, id: false, force: true do |t|
     t.string  :code
     t.string  :description
     t.integer :moon_id
+    t.timestamps null: false
   end
 
   create_table :preferences, force: true do |t|
     t.integer :person_id
     t.boolean :advanced_mode, default: false
+    t.timestamps null: false
   end
 
   create_table :facts, force: true do |t|
@@ -128,12 +133,14 @@ ActiveRecord::Schema.define do
     t.time     :bedtime
     t.binary   :photo, limit: 1.kilobyte
     t.boolean  :cool
+    t.timestamps null: false
   end
 
   create_table :books, force: true do |t|
     t.string :title
     t.string :isbn
     t.boolean :banned, default: false
+    t.timestamps null: false
   end
 
   create_table :book_authors, force: true do |t|
@@ -151,6 +158,7 @@ ActiveRecord::Schema.define do
 
   create_table :customers, force: true do |t|
     t.string   :name
+    t.timestamps null: false
   end
 
   create_table :purchase_orders, force: true do |t|
@@ -199,6 +207,7 @@ ActiveRecord::Schema.define do
   create_table :categories, force: true do |t|
     t.string :name
     t.string :status, limit: 10
+    t.timestamps null: false
   end
 
   create_table :pictures, force: true do |t|
@@ -226,27 +235,33 @@ ActiveRecord::Schema.define do
     t.string :drive_layout
     t.string :serial_number
     t.integer :person_id
+    t.timestamps null: false
   end
 
   create_table :makes, force: true do |t|
     t.string :model
+    t.timestamps null: false
   end
 
   # special cases - fields that look like they should be reserved names
   create_table :hrefs, force: true do |t|
     t.string :name
+    t.timestamps null: false
   end
 
   create_table :links, force: true do |t|
     t.string :name
+    t.timestamps null: false
   end
 
   create_table :web_pages, force: true do |t|
     t.string :href
     t.string :link
+    t.timestamps null: false
   end
 
   create_table :questionables, force: true do |t|
+    t.timestamps null: false
   end
   # special cases
 end
@@ -371,7 +386,7 @@ class Planet < ActiveRecord::Base
         return false
       end
       # :nocov:
-   end
+    end
   end
 end
 
@@ -962,7 +977,7 @@ class PostResource < JSONAPI::Resource
   def self.sortable_fields(context)
     super(context) - [:id] + [:"author.name"]
   end
- 
+
   def self.verify_key(key, context = nil)
     super(key)
     raise JSONAPI::Exceptions::RecordNotFound.new(key) unless find_by_key(key, context: context)
@@ -1029,7 +1044,7 @@ class PlanetResource < JSONAPI::Resource
 
   has_many :tags, acts_as_set: true
 
-  def records_for_moons
+  def records_for_moons(opts = {})
     Moon.joins(:craters).select('moons.*, craters.code').distinct
   end
 end
@@ -1069,8 +1084,8 @@ class PreferencesResource < JSONAPI::Resource
 
   has_one :author, :foreign_key_on => :related
 
-  def self.find_by_key(key, options = {})
-    new(Preferences.first, nil)
+  def self.find_records(filters, options = {})
+    Preferences.limit(1)
   end
 end
 
@@ -1274,6 +1289,8 @@ module Api
       attribute :title
       attributes :isbn, :banned
 
+      has_many :authors
+
       has_many :book_comments, relation_name: -> (options = {}) {
         context = options[:context]
         current_user = context ? context[:current_user] : nil
@@ -1392,24 +1409,16 @@ module Api
 
       filter :name
 
-      def self.find_by_key(key, options = {})
-        context = options[:context]
-        records = records(options)
-        records = apply_includes(records, options)
-        model = records.where({_primary_key => key}).first
-        fail JSONAPI::Exceptions::RecordNotFound.new(key) if model.nil?
-        self.new(model, context)
-      end
-
-      def self.find(filters, options = {})
-        resources = []
-
+      def self.find_records(filters, options = {})
+        rel = _model_class
         filters.each do |attr, filter|
-          _model_class.where("\"#{attr}\" LIKE \"%#{filter[0]}%\"").each do |model|
-            resources.push self.new(model, options[:context])
+          if attr.to_s == "id"
+            rel = rel.where(id: filter)
+          else
+            rel = rel.where("\"#{attr}\" LIKE \"%#{filter[0]}%\"")
           end
         end
-        return resources
+        rel
       end
 
       def fetchable_fields
