@@ -339,6 +339,8 @@ module JSONAPI
         resources = _resource_klass.resources_for(records, options[:context]).map { |r| [r.id, r] }.to_h
       end
 
+      result = resources.values # Don't add preloaded fragments to top-level return value
+
       if options[:include_directives]
         resource_pile = { _resource_klass.name => resources }
         options[:include_directives].all_paths.each do |path|
@@ -348,7 +350,7 @@ module JSONAPI
         end
       end
 
-      resources.values
+      result
     end
 
     def find_records(filters, options = {})
@@ -432,11 +434,16 @@ module JSONAPI
         conn = valid_tgts_rel.connection
         tgt_attr = tgt_table[tgt_res_class._primary_key]
 
+        valid_tgts_query = valid_tgts_rel.to_sql
+        if valid_tgts_query.empty? # e.g. ActiveRecord::NullRelation
+          return
+        end
+
         # Alter a normal AR query to select only the primary key instead of all columns.
         # Sadly doing direct string manipulation of query here, cannot use ARel for this due to
         # bind values being stripped from AR::Relation#arel in Rails >= 4.2, see
         # https://github.com/rails/arel/issues/363
-        valid_tgts_query = valid_tgts_rel.to_sql.sub('*', conn.quote_column_name(tgt_attr.name))
+        valid_tgts_query.sub!('*', conn.quote_column_name(tgt_attr.name))
         valid_tgts_cond = "#{quote_arel_attribute(conn, tgt_attr)} IN (#{valid_tgts_query})"
 
         record_source = record_source.where(valid_tgts_cond)
