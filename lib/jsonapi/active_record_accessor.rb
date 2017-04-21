@@ -339,6 +339,8 @@ module JSONAPI
         resources = _resource_klass.resources_for(records, options[:context]).map { |r| [r.id, r] }.to_h
       end
 
+      result = resources.values # Don't add preloaded fragments to top-level return value
+
       if options[:include_directives]
         resource_pile = { _resource_klass.name => resources }
         options[:include_directives].all_paths.each do |path|
@@ -348,7 +350,7 @@ module JSONAPI
         end
       end
 
-      resources.values
+      result
     end
 
     def find_records(filters, options = {})
