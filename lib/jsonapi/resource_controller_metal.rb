@@ -5,10 +5,10 @@ module JSONAPI
       ActionController::Rendering,
       ActionController::Renderers::All,
       ActionController::StrongParameters,
-      ActionController::ForceSSL,
+      Gem::Requirement.new('< 6.1').satisfied_by?(ActionPack.gem_version) ? ActionController::ForceSSL : nil,
       ActionController::Instrumentation,
       JSONAPI::ActsAsResourceController
-    ].freeze
+    ].compact.freeze
 
     MODULES.each do |mod|
       include mod

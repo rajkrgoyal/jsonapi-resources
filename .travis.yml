@@ -1,19 +1,31 @@
 language: ruby
 sudo: false
 env:
-  - "RAILS_VERSION=4.2.7"
-  - "RAILS_VERSION=5.0.2"
-  - "RAILS_VERSION=master"
+  - "RAILS_VERSION=4.2.11"
+  - "RAILS_VERSION=5.0.7.2"
+  - "RAILS_VERSION=5.1.7"
+  - "RAILS_VERSION=5.2.3"
+  - "RAILS_VERSION=6.0.0"
+  - "RAILS_VERSION=6.1.0"
 rvm:
-  - 2.1.10
-  - 2.2.6
-  - 2.3.3
-  - 2.4.1
+  - 2.3.8
+  - 2.4.7
+  - 2.5.6
+  - 2.6.4
 matrix:
-  exclude:
-    - rvm: 2.1.10
-      env: "RAILS_VERSION=5.0.2"
-    - rvm: 2.4.1
-      env: "RAILS_VERSION=4.2.7"
   allow_failures:
     - env: "RAILS_VERSION=master"
+    - env: "RAILS_VERSION=6.0.0.beta1"
+  exclude:
+    - rvm: 2.6.4
+      env: "RAILS_VERSION=4.2.11"
+    - rvm: 2.3.8
+      env: "RAILS_VERSION=6.0.0"
+    - rvm: 2.4.7
+      env: "RAILS_VERSION=6.0.0"
+    - rvm: 2.3.8
+      env: "RAILS_VERSION=6.1.0"
+    - rvm: 2.4.7
+      env: "RAILS_VERSION=6.1.0"
+before_install:
+  - gem install bundler --version 1.17.3
